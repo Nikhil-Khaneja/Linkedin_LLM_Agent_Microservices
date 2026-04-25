@@ -1,0 +1,131 @@
+version: "3.8"
+
+services:
+  # ── Redpanda (Kafka-compatible, low memory) ──────────────────────
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.6
+    container_name: owner7-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --smp 1
+      - --memory 256M
+      - --overprovisioned
+      - --default-log-level=warn
+    ports:
+      - "19092:19092"
+      - "18081:8081"
+      - "18082:8082"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redpanda Console (optional UI for debugging) ─────────────────
+  console:
+    image: docker.redpanda.com/redpandadata/console:v2.4.3
+    container_name: owner7-console
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  # ── MongoDB ──────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: owner7-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: analytics
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: owner7-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Frontend (React → nginx, built from frontend/Dockerfile) ─────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_ANALYTICS_URL=/analytics-api
+    container_name: owner7-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - analytics-api
+
+  # ── Analytics API (your FastAPI service) ─────────────────────────
+  analytics-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: owner7-analytics-api
+    ports:
+      - "8000:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB=analytics
+      - REDIS_URL=redis://redis:6379/0
+      - ENV=development
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── JMeter (runs benchmark scenarios, exits when done) ───────────
+  jmeter:
+    build:
+      context: ./jmeter
+      dockerfile: Dockerfile
+    container_name: owner7-jmeter
+    environment:
+      - API_HOST=analytics-api
+      - API_PORT=8000
+      - SCENARIO=both
+    volumes:
+      - ./jmeter/plans:/jmeter/plans
+      - ./jmeter/results:/jmeter/results
+    depends_on:
+      - analytics-api
+    profiles:
+      - benchmark
+
+volumes:
+  redpanda_data:
+  mongo_data:
+  redis_data:
