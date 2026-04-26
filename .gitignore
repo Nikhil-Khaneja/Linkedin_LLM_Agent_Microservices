@@ -1,0 +1,59 @@
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# ── Secrets — never commit real env files ─────────────────────
+.env
+*.env
+!.env.example
+
+# ── Test / coverage artifacts ─────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+test_app.db
+
+# ── SQLite local databases ────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── IDE / editor ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── macOS ────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Docker volumes (if mounted locally) ──────────────────────
+mysql_data/
+
+# ── k6 benchmark output ───────────────────────────────────────
+benchmark_results.json
+benchmark_results_*.json
