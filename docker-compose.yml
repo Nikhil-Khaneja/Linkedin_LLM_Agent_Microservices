@@ -1,0 +1,413 @@
+networks:
+  linkedin-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  mongo-data:
+  redis-data:
+  es-data:
+
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    platform: linux/amd64
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | timeout 2 nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    platform: linux/amd64
+    depends_on:
+      zookeeper: { condition: service_healthy }
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    ports:
+      - "9092:9092"
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  mysql:
+    image: mysql:8.0
+    platform: linux/amd64
+    environment:
+      MYSQL_ROOT_PASSWORD: linkedin_root
+      MYSQL_DATABASE: linkedin_db
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./database/mysql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks: [linkedin-net]
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-plinkedin_root"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  mongodb:
+    image: mongo:4.4
+    platform: linux/amd64
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: linkedin_admin
+      MONGO_INITDB_ROOT_PASSWORD: linkedin_mongo_pass
+      MONGO_INITDB_DATABASE: linkedin_nosql
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./database/mongodb/init.js:/docker-entrypoint-initdb.d/init.js
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/amd64
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks: [linkedin-net]
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    platform: linux/amd64
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=linkedin-cluster
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  kibana:
+    image: kibana:8.11.0
+    platform: linux/amd64
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    networks: [linkedin-net]
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    platform: linux/amd64
+    depends_on:
+      kafka: { condition: service_healthy }
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic user.created
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic job.created
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic job.updated
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic job.viewed
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic job.saved
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic job.closed
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic application.submitted
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic application.status.updated
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic message.sent
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic connection.requested
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic connection.accepted
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic connection.rejected
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic ai.requests
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic ai.results
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic analytics.events
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic member.created
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic member.updated
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.application.submitted
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.application.status.updated
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.message.sent
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.connection.requested
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.connection.accepted
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.job.created
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.job.viewed
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.analytics.events
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.ai.requests
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic dlq.ai.results
+      echo done
+      "
+    networks: [linkedin-net]
+
+  auth-service:
+    build: ./services/auth-service
+    environment:
+      PORT: 3001
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      JWT_PRIVATE_KEY_PATH: /app/keys/private.pem
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      JWT_EXPIRES_IN: "86400"
+    ports:
+      - "3001:3001"
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  member-service:
+    build: ./services/member-service
+    environment:
+      PORT: 3002
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      MONGODB_URI: mongodb://linkedin_admin:linkedin_mongo_pass@mongodb:27017/linkedin_nosql?authSource=admin
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:3001/.well-known/jwks.json
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "3002:3002"
+    depends_on:
+      mysql: { condition: service_healthy }
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      auth-service: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  recruiter-service:
+    build: ./services/recruiter-service
+    environment:
+      PORT: 3003
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:3001/.well-known/jwks.json
+    ports:
+      - "3003:3003"
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      auth-service: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  job-service:
+    build: ./services/job-service
+    environment:
+      PORT: 3004
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:3001/.well-known/jwks.json
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "3004:3004"
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      auth-service: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  application-service:
+    build: ./services/application-service
+    environment:
+      PORT: 3005
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      MONGODB_URI: mongodb://linkedin_admin:linkedin_mongo_pass@mongodb:27017/linkedin_nosql?authSource=admin
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:3001/.well-known/jwks.json
+    ports:
+      - "3005:3005"
+    depends_on:
+      mysql: { condition: service_healthy }
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      auth-service: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  messaging-service:
+    build: ./services/messaging-service
+    environment:
+      PORT: 3006
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      MONGODB_URI: mongodb://linkedin_admin:linkedin_mongo_pass@mongodb:27017/linkedin_nosql?authSource=admin
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:3001/.well-known/jwks.json
+    ports:
+      - "3006:3006"
+    depends_on:
+      mysql: { condition: service_healthy }
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      auth-service: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  analytics-service:
+    build: ./services/analytics-service
+    environment:
+      PORT: 3007
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      MONGODB_URI: mongodb://linkedin_admin:linkedin_mongo_pass@mongodb:27017/linkedin_nosql?authSource=admin
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:3001/.well-known/jwks.json
+    ports:
+      - "3007:3007"
+    depends_on:
+      mysql: { condition: service_healthy }
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      auth-service: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  ai-service:
+    build: ./services/ai-service
+    environment:
+      PORT: 8000
+      MONGODB_URI: mongodb://linkedin_admin:linkedin_mongo_pass@mongodb:27017/linkedin_nosql?authSource=admin
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:3001/.well-known/jwks.json
+      MEMBER_SERVICE_URL: http://member-service:3002
+      JOB_SERVICE_URL: http://job-service:3004
+      APPLICATION_SERVICE_URL: http://application-service:3005
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\" || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  notification-service:
+    build: ./services/notification-service
+    environment:
+      PORT: 3008
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      KAFKA_BROKERS: kafka:9092
+    ports:
+      - "3008:3008"
+    depends_on:
+      mysql: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  worker-service:
+    build: ./services/worker-service
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: linkedin_user
+      MYSQL_PASSWORD: linkedin_pass
+      MYSQL_DATABASE: linkedin_db
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      mysql: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [linkedin-net]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - auth-service
+      - member-service
+      - recruiter-service
+      - job-service
+      - application-service
+      - messaging-service
+      - analytics-service
+      - ai-service
+    restart: unless-stopped
+    networks: [linkedin-net]
