@@ -1,357 +1,233 @@
-# Owner 7 — Analytics + Kafka Host Service
+# LinkedIn Simulation — Distributed Microservices Platform
 
-> LinkedIn Simulation + Agentic AI Services — 8-Account AWS Architecture  
-> **Jira tickets:** LI-07 · LI-15 · LI-23 · LI-31
-
-Owner 7 is the analytics hub and **shared Kafka broker** for the entire 8-owner distributed LinkedIn-like platform. Every other owner's service connects to Kafka hosted here and publishes events that this service aggregates into dashboards and benchmark artifacts.
+> 8-owner distributed system simulating LinkedIn's core functionality with agentic AI, event-driven architecture, and AWS multi-account deployment.
 
 ---
 
-## Service Ownership Overview
+## Overview
 
-| Owner | Service | Stack |
-|---|---|---|
-| Owner 1 | Auth + API Edge | EC2 + MySQL + Redis |
-| Owner 2 | Member Profile | EC2 + MySQL + MongoDB |
-| Owner 3 | Recruiter & Company | EC2 + MySQL |
-| Owner 4 | Job | EC2 + MySQL + Redis |
-| Owner 5 | Application | EC2 + MySQL + Redis |
-| Owner 6 | Messaging + Connections | EC2 + MongoDB + Redis |
-| **Owner 7** | **Analytics + Kafka Host** | **EC2 + MongoDB + Redis + Kafka** |
-| Owner 8 | FastAPI Agent Orchestrator | EC2 + MongoDB + Redis |
+This monorepo contains all 8 microservices built collaboratively across 8 owners. Each service is independently deployable on its own EC2 instance, communicates over Kafka (hosted by Owner 7), and exposes a REST API consumed by the shared React frontend.
 
-Owner 7 is the **only** member who additionally hosts the shared Kafka runtime. All other services stay fully autonomous.
+| Owner | Service | Tech Stack | Port |
+|---|---|---|---|
+| Owner 1 | Auth + API Gateway | FastAPI · MySQL · Redis · RS256 JWT | 8001 |
+| Owner 2 | Member Profile | Node/Express · MySQL · Elasticsearch | 8002 |
+| Owner 3 | Recruiter & Company | Node/Express · MySQL · Redis | 8003 |
+| Owner 4 | Job Listings | Node/Express · MySQL · Redis | 8004 |
+| Owner 5 | Applications | Node/Express · MySQL · Redis | 8005 |
+| Owner 6 | Messaging & Connections | Node/Express · MongoDB · Redis | 8006 |
+| Owner 7 | Analytics + Kafka Host | FastAPI · MongoDB · Redis · Kafka | 8007 |
+| Owner 8 | AI Agent Orchestrator | FastAPI · MongoDB · Redis | 8008 |
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                   Owner 7 EC2 — Analytics Service                │
-│                                                                  │
-│   Browser → React Frontend (port 3000)                          │
-│                  │ nginx /analytics-api/ proxy                   │
-│                  ▼                                               │
-│          FastAPI API (port 8000)                                 │
-│                  │                                               │
-│     ┌────────────┼───────────────────┐                          │
-│     ▼            ▼                   ▼                          │
-│  MongoDB      Redis               Redpanda                      │
-│  (27017)     (6379)              (19092 ext)                    │
-│  events_raw  analytics cache     Kafka broker                   │
-│  rollups     5 min TTL           for all 8 owners               │
-└──────────────────────────────────────────────────────────────────┘
-         ▲ Kafka events from Owners 1–6, 8
+┌─────────────────────────────────────────────────────────────────────┐
+│                        React Frontend (nginx)                        │
+│                   Calls each service directly by port                │
+└───┬────────┬────────┬────────┬────────┬────────┬────────┬───────────┘
+    │        │        │        │        │        │        │
+  :8001    :8002    :8003    :8004    :8005    :8006    :8007   :8008
+  Auth    Member  Recruiter  Job     Apply   Message  Analytics  AI
+    │        │        │        │        │        │        │
+    └────────┴────────┴────────┴───────►│        │        │
+                                        ▼        ▼        ▼
+                                       Kafka Broker (Owner 7 EC2)
+                                       Topics: user.*, job.*, application.*
+                                                member.*, message.*, ai.*
 ```
 
-**Redpanda** is used as the Kafka broker — 100% Kafka API-compatible with lower memory overhead. All other owners connect using standard Kafka clients pointed at `<owner7-ec2>:19092`.
+**Auth flow:** Owner 1 issues RS256 JWTs. All other services validate tokens via the JWKS endpoint at `http://auth-service:8001/auth/jwks`.
+
+**Event flow:** Every service publishes domain events to Kafka. Owner 7 consumes all 23 topics for analytics aggregation. Owner 8 consumes job/application events to trigger AI recommendations.
 
 ---
 
-## Local Quick Start
+## Local Quick Start (Full Stack)
 
 ```bash
-# 1. Clone and start all containers
-docker compose up -d
+# Clone the repo
+git clone https://github.com/Nikhil-Khaneja/Linkedin_LLM_Agent_Microservices.git
+cd Linkedin_LLM_Agent_Microservices
 
-# 2. Seed 30 days of sample analytics data
+# Start all 8 services + infrastructure
+docker compose -f docker-compose.monorepo.yml up -d
+
+# Wait ~60s for all health checks to pass, then verify
+docker compose -f docker-compose.monorepo.yml ps
+
+# Seed analytics sample data (30 days of synthetic events)
 python3 scripts/seed_events.py
 
-# 3. Open frontend
+# Frontend
 open http://localhost:3000
 
-# 4. Swagger API docs
-open http://localhost:8000/docs
-
-# 5. Redpanda Console (topic browser)
-open http://localhost:8080
-```
-
-**Dummy user for local dev** (paste in browser console after opening http://localhost:3000):
-```js
-localStorage.setItem('access_token', 'eyJhbGciOiAiSFMyNTYifQ.eyJ1c2VySWQiOiJkZXZfMDAxIiwidXNlclR5cGUiOiJyZWNydWl0ZXIiLCJleHAiOjk5OTk5OTk5OTl9.fake');
-localStorage.setItem('user_data', JSON.stringify({"userId":"dev_001","userType":"recruiter","email":"nikhil@owner7.dev"}));
-location.reload();
+# Swagger docs per service
+open http://localhost:8001/docs   # Auth
+open http://localhost:8007/docs   # Analytics
+open http://localhost:8008/docs   # AI
 ```
 
 ---
 
-## Services & Ports
+## Services
 
-| Container | Port | Description |
+### Owner 1 — Auth Service (`services/auth-service`)
+
+FastAPI service handling registration, login, token refresh, and logout. Issues RS256 JWTs. Exposes a JWKS endpoint used by all other services for token validation.
+
+**Key endpoints:**
+
+| Method | Path | Description |
 |---|---|---|
-| `analytics-api` | 8000 | FastAPI backend |
-| `frontend` | 3000 | React UI via nginx |
-| `mongodb` | 27017 | Event store + rollup collections |
-| `redis` | 6379 | Analytics query cache (5 min TTL) |
-| `redpanda` | 19092 | Kafka-compatible broker (external) |
-| `redpanda` | 9092 | Kafka broker (internal Docker network) |
-| `console` | 8080 | Redpanda Console UI |
+| POST | `/auth/register` | Register new user, returns access + refresh tokens |
+| POST | `/auth/login` | Login, returns access + refresh tokens |
+| POST | `/auth/refresh` | Rotate refresh token |
+| POST | `/auth/logout` | Revoke refresh token |
+| GET | `/auth/jwks` | RS256 public key in JWKS format |
+| GET | `/health` | Health check |
+
+**Stack:** FastAPI · SQLAlchemy · PyMySQL · passlib/bcrypt · python-jose RS256 · Redis (rate limiting) · Alembic
 
 ---
 
-## API Reference (LI-07, LI-15)
+### Owner 2 — Member Profile Service (`services/member-service`)
 
-All request/response bodies use JSON. No authentication required during local development.
+Node/Express service for member profiles with full-text search via Elasticsearch.
 
-### Health Check
+**Key endpoints:**
 
-```
-GET /health
-```
+| Method | Path | Description |
+|---|---|---|
+| POST | `/members` | Create member profile |
+| GET | `/members/:id` | Get member by ID |
+| PUT | `/members/:id` | Update profile |
+| GET | `/members/search?q=` | Full-text search via Elasticsearch |
+| GET | `/health` | Health check |
 
-```json
-{ "status": "ok", "service": "owner7-analytics" }
-```
-
----
-
-### 1. Ingest Event
-
-```
-POST /events/ingest
-```
-
-Accepts a UI or service event using the **standard Kafka envelope** agreed upon by all 8 owners. Stores in MongoDB and re-publishes to `analytics.<event_type>` topic.
-
-Returns **HTTP 409** if the `idempotency_key` was already processed (safe for at-least-once retry).
-
-**Request:**
-```json
-{
-  "event_type": "job.viewed",
-  "actor_id": "mem_501",
-  "trace_id": "trc_1001",
-  "entity": {
-    "entity_type": "job",
-    "entity_id": "job_3301"
-  },
-  "payload": {
-    "city": "San Jose",
-    "state": "CA",
-    "source": "web"
-  },
-  "idempotency_key": "mem501-job3301-view-v1"
-}
-```
-
-**Response 200:**
-```json
-{ "accepted": true, "event_id": "evt_44001" }
-```
-
-**Response 409 — duplicate:**
-```json
-{
-  "detail": {
-    "error": "duplicate_event",
-    "message": "Event with this idempotency_key already processed",
-    "original_event_id": "evt_44001"
-  }
-}
-```
+**Stack:** Node.js · Express · MySQL · Elasticsearch · ioredis
 
 ---
 
-### 2. Top Jobs
+### Owner 3 — Recruiter & Company Service (`services/recruiter-service`)
 
-```
-POST /analytics/jobs/top
-```
+Node/Express service managing recruiter accounts and company profiles.
 
-Returns top N jobs ranked by a chosen metric. Redis-cached for 5 minutes.
+**Key endpoints:**
 
-**Request:**
-```json
-{
-  "metric": "applications",
-  "days": 30,
-  "limit": 10
-}
-```
+| Method | Path | Description |
+|---|---|---|
+| POST | `/recruiters` | Create recruiter |
+| GET | `/recruiters/:id` | Get recruiter |
+| POST | `/companies` | Create company |
+| GET | `/companies/:id` | Get company |
+| GET | `/health` | Health check |
 
-`metric` options: `applications` | `views` | `saves`
-
-**Response:**
-```json
-{
-  "jobs": [
-    { "job_id": "job_3301", "count": 142 },
-    { "job_id": "job_2201", "count": 97 }
-  ],
-  "metric": "applications",
-  "limit": 10
-}
-```
+**Stack:** Node.js · Express · MySQL · ioredis
 
 ---
 
-### 3. View-Save-Apply Funnel
+### Owner 4 — Job Service (`services/job-service`)
 
-```
-POST /analytics/funnel
-```
+Node/Express service for job postings with Redis-cached search.
 
-Calculates conversion funnel for a specific job or all jobs across the lookback window.
+**Key endpoints:**
 
-**Request:**
-```json
-{
-  "job_id": "job_3301",
-  "days": 30
-}
-```
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/jobs` | Create job posting |
+| GET | `/api/v1/jobs/:id` | Get job by ID |
+| GET | `/api/v1/jobs/search` | Search jobs (Redis-cached) |
+| PUT | `/api/v1/jobs/:id` | Update job |
+| DELETE | `/api/v1/jobs/:id` | Close job |
+| GET | `/health` | Health check |
 
-`job_id` is optional — omit to aggregate across all jobs.
-
-**Response:**
-```json
-{
-  "views": 540,
-  "saves": 87,
-  "applications": 34,
-  "view_to_save_rate": 0.1611,
-  "save_to_apply_rate": 0.3908,
-  "view_to_apply_rate": 0.063
-}
-```
+**Stack:** Node.js · Express · MySQL · Redis · KafkaJS
 
 ---
 
-### 4. Geo Distribution
+### Owner 5 — Application Service (`services/application-service`)
 
-```
-POST /analytics/geo
-```
+Node/Express service tracking job applications through their lifecycle.
 
-City/state breakdown of job activity. All fields optional — combine freely for drill-down.
+**Key endpoints:**
 
-**Request:**
-```json
-{
-  "job_id": "job_3301",
-  "city": "San Jose",
-  "state": "CA",
-  "event_type": "application.submitted",
-  "days": 30,
-  "limit": 20
-}
-```
+| Method | Path | Description |
+|---|---|---|
+| POST | `/applications` | Submit application |
+| GET | `/applications/:id` | Get application |
+| PUT | `/applications/:id/status` | Update status |
+| GET | `/applications/member/:memberId` | All applications by member |
+| GET | `/health` | Health check |
 
-`event_type` defaults to both `job.viewed` and `application.submitted` when omitted.
-
-**Response:**
-```json
-{
-  "distribution": [
-    { "location": "San Jose, CA", "count": 78 },
-    { "location": "New York, NY", "count": 45 },
-    { "location": "Austin, TX", "count": 31 }
-  ]
-}
-```
+**Stack:** Node.js · Express · MySQL · Redis · KafkaJS
 
 ---
 
-### 5. Member Dashboard
+### Owner 6 — Messaging & Connections Service (`services/messaging-service`)
 
-```
-POST /analytics/member/dashboard
-```
+Node/Express service for direct messages and connection requests.
 
-Returns engagement metrics rolled up for a specific member.
+**Key endpoints:**
 
-**Request:**
-```json
-{ "member_id": "mem_501" }
-```
+| Method | Path | Description |
+|---|---|---|
+| POST | `/messages` | Send message |
+| GET | `/messages/thread/:threadId` | Get message thread |
+| POST | `/connections/request` | Send connection request |
+| PUT | `/connections/:id/accept` | Accept connection |
+| GET | `/health` | Health check |
 
-**Response:**
-```json
-{
-  "profile_views": 24,
-  "applications_sent": 7,
-  "connections": 12,
-  "messages_received": 5,
-  "job_matches": 0
-}
-```
-
-`job_matches` is populated by Owner 8 (AI service) after integration.
+**Stack:** Node.js · Express · MongoDB · ioredis · KafkaJS
 
 ---
 
-### 6. Benchmark Report
+### Owner 7 — Analytics Service (`services/analytics-service`)
 
-```
-POST /benchmarks/report
-```
+FastAPI service that consumes all Kafka events and provides analytics dashboards, funnel analysis, geo distribution, and benchmark reporting. Also hosts the shared Kafka broker for all other owners.
 
-Stores a JMeter/load test result and publishes `benchmark.completed` to Kafka. Used to assemble presentation artifacts (LI-31).
+**Key endpoints:**
 
-**Request:**
-```json
-{
-  "scenario": "A",
-  "owner_id": "owner7",
-  "service_name": "analytics-service",
-  "results": {
-    "total_requests": 10000,
-    "throughput_rps": 182.7,
-    "avg_response_ms": 4,
-    "error_rate_pct": 0.0
-  },
-  "metadata": {
-    "endpoint": "/events/ingest",
-    "threads": 50,
-    "ramp_time_sec": 30
-  }
-}
-```
+| Method | Path | Description |
+|---|---|---|
+| POST | `/events/ingest` | Ingest event (idempotent) |
+| POST | `/analytics/jobs/top` | Top jobs by metric |
+| POST | `/analytics/funnel` | View→Save→Apply funnel |
+| POST | `/analytics/geo` | Geo distribution of activity |
+| POST | `/analytics/member/dashboard` | Member engagement rollup |
+| POST | `/benchmarks/report` | Store JMeter benchmark result |
+| GET | `/health` | Health check |
 
-`scenario`: `"A"` or `"B"` — aligns with the project benchmark plan.
-
-**Response:**
-```json
-{ "benchmark_id": "bench_9f6ac596", "status": "stored" }
-```
+**Stack:** FastAPI · Motor (MongoDB async) · Redis · aiokafka · Pydantic v2
 
 ---
 
-## Kafka Integration
+### Owner 8 — AI Agent Orchestrator (`services/ai-service`)
 
-### Broker Connection
+FastAPI service that uses LLM-based agents to match members with jobs, generate application recommendations, and process AI approval workflows.
 
-| Context | Address |
-|---|---|
-| Internal Docker network | `redpanda:9092` |
-| Localhost / other owners (EC2) | `<owner7-ec2-public-ip>:19092` |
+**Key endpoints:**
 
-### Topics Owner 7 Consumes (23 topics)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/ai/recommend` | Generate job recommendations for member |
+| POST | `/ai/approve` | Human-in-the-loop approval step |
+| GET | `/ai/status/:requestId` | Check AI request status |
+| GET | `/health` | Health check |
 
-| Source Owner | Topics |
-|---|---|
-| Owner 1 — Auth | `user.created`, `user.logout` |
-| Owner 2 — Member Profile | `member.created`, `member.updated`, `profile.viewed` |
-| Owner 3 — Recruiter | `recruiter.created`, `recruiter.updated` |
-| Owner 4 — Job | `job.created`, `job.updated`, `job.closed`, `job.viewed`, `job.search.executed` |
-| Owner 5 — Application | `application.submitted`, `application.status.updated`, `application.note.added` |
-| Owner 6 — Messaging | `message.sent`, `thread.opened`, `connection.requested`, `connection.accepted` |
-| Owner 8 — AI Agent | `ai.requested`, `ai.completed`, `ai.approved`, `ai.rejected` |
-
-### Topics Owner 7 Publishes
-
-| Topic | Trigger |
-|---|---|
-| `analytics.<event_type>` | Every successfully ingested event |
-| `benchmark.completed` | Every benchmark report submission |
+**Stack:** FastAPI · Motor (MongoDB) · Redis · aiokafka · LangChain / OpenAI
 
 ---
 
-## Standard Kafka Event Envelope
+## Infrastructure
 
-All 8 owners agreed on this shared contract. Every event published to Kafka must follow this structure:
+### Kafka Event Bus
+
+Owner 7's EC2 hosts the shared Kafka broker. All services connect to it for event publishing and consumption.
+
+**Standard event envelope** (all owners must follow this schema):
 
 ```json
 {
@@ -363,203 +239,200 @@ All 8 owners agreed on this shared contract. Every event published to Kafka must
     "entity_type": "application",
     "entity_id": "app_8807"
   },
-  "payload": {
-    "job_id": "job_3301",
-    "member_id": "mem_501",
-    "resume_ref": "s3://bucket/resume-501.pdf"
-  },
+  "payload": {},
   "idempotency_key": "mem501-job3301-v1"
 }
 ```
 
-- `trace_id` is preserved end-to-end across all services and AI workflows
-- Every consumer must be **idempotent** and safe under at-least-once delivery
-- `idempotency_key` is optional but strongly recommended for mutation events
+**Topics by domain:**
 
----
-
-## MongoDB Collections
-
-| Collection | Purpose |
+| Domain | Topics |
 |---|---|
-| `events_raw` | Raw ingested events with full envelope |
-| `recruiter_dash_rollups` | Daily rollup counters per job (views, applies, saves) |
-| `member_dash_rollups` | Daily rollup counters per member (profile views, messages, connections) |
-| `benchmark_runs` | Stored JMeter benchmark results |
+| Auth | `user.created`, `user.logout` |
+| Member | `member.created`, `member.updated`, `profile.viewed` |
+| Recruiter | `recruiter.created`, `recruiter.updated` |
+| Job | `job.created`, `job.updated`, `job.closed`, `job.viewed`, `job.search.executed` |
+| Application | `application.submitted`, `application.status.updated`, `application.note.added` |
+| Messaging | `message.sent`, `thread.opened`, `connection.requested`, `connection.accepted` |
+| AI | `ai.requested`, `ai.completed`, `ai.approved`, `ai.rejected` |
+| Analytics | `analytics.<event_type>`, `benchmark.completed` |
 
-**Key indexes:**
-- `events_raw`: `{ event_type, timestamp }`, `{ idempotency_key }` (unique sparse)
-- `recruiter_dash_rollups`: `{ job_id, date }`
-- `member_dash_rollups`: `{ member_id, date }`
+### Databases
 
----
+Each service owns its own database — no cross-service DB access.
 
-## Performance Benchmarks (LI-23, LI-31)
-
-Run with JMeter via Docker:
-
-```bash
-# Run both scenarios (Scenario A + B)
-docker compose --profile benchmark run --rm jmeter
-
-# Scenario A only — ingest stress test
-docker compose --profile benchmark run --rm -e SCENARIO=A jmeter
-
-# Scenario B only — analytics query load test
-docker compose --profile benchmark run --rm -e SCENARIO=B jmeter
-```
-
-### Results (local M-series Mac)
-
-| Scenario | Endpoint(s) | Threads | Requests | Throughput | Avg Latency | Error Rate |
-|---|---|---|---|---|---|---|
-| A — Ingest | `POST /events/ingest` | 50 | 10,000 | **186 req/s** | 3ms | **0%** |
-| B — Queries | All 4 analytics endpoints | 30 | 12,000 | **117 req/s** | 2ms | **0%** |
-
-Results saved to `jmeter/results/` as CSV + HTML reports. Summaries auto-posted to `/benchmarks/report`.
-
-> Per the project spec: Owner 4 owns Scenario A (job search + Redis cache), Owner 5 owns Scenario B (apply submit). Owner 7 collects and assembles final benchmark figures for presentation.
-
----
-
-## Running Tests
-
-```bash
-# Install dependencies (no Docker needed for unit tests)
-pip install -r requirements.txt
-
-# Full suite — 40 tests
-pytest tests/ -v
-
-# Unit tests only (mocked DB/Redis/Kafka)
-pytest tests/test_units.py -v
-
-# API integration tests (requires running service)
-pytest tests/test_api.py -v
-```
-
-Test modules:
-- `test_units.py` — covers settings, Pydantic models, DB helpers, analytics service, Kafka consumer via `AsyncMock`
-- `test_api.py` — covers all endpoints including idempotency 409 enforcement
-
----
-
-## Environment Variables
-
-| Variable | Default | Description |
+| Service | Database | Container |
 |---|---|---|
-| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Redpanda/Kafka broker address |
-| `KAFKA_CONSUMER_GROUP` | `owner7-analytics` | Consumer group ID |
-| `MONGODB_URL` | `mongodb://localhost:27017` | MongoDB connection string |
-| `MONGODB_DB` | `analytics` | MongoDB database name |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `REDIS_CACHE_TTL` | `300` | Query cache TTL in seconds |
-| `ENV` | `development` | Environment name |
+| auth-service | MySQL `auth_access` | `mysql-auth:3306` |
+| member-service | MySQL `member_core` | `mysql-member:3306` |
+| recruiter-service | MySQL `recruiter_core` | `mysql-recruiter:3306` |
+| job-service | MySQL `job_core` | `mysql-job:3306` |
+| application-service | MySQL `application_core` | `mysql-app:3306` |
+| messaging-service | MongoDB | `mongodb:27017` |
+| analytics-service | MongoDB `analytics` | `mongodb:27017` |
+| ai-service | MongoDB `ai_service` | `mongodb:27017` |
+
+### Shared Infrastructure
+
+| Service | Purpose |
+|---|---|
+| Redis | Rate limiting (auth), query caching (analytics, job, application) |
+| Kafka + Zookeeper | Event bus for all inter-service communication |
+| Elasticsearch | Full-text member profile search (member-service) |
 
 ---
 
-## Project Structure
+## Monorepo Structure
 
 ```
-owner7-analytics-service/
-├── app/
-│   ├── api/routes.py              # 6 API endpoints (health + 5 analytics)
-│   ├── config/settings.py         # Env-based config via pydantic-settings
-│   ├── consumers/
-│   │   └── event_consumer.py      # aiokafka consumer — 23 cross-owner topics
-│   ├── models/events.py           # KafkaEventEnvelope + request/response models
-│   ├── services/
-│   │   └── analytics_service.py   # Business logic + Redis caching layer
-│   └── utils/db.py                # MongoDB motor + Redis async connection helpers
-├── frontend/
-│   ├── Dockerfile                 # Multi-stage: node build → nginx serve
-│   ├── nginx.conf                 # Reverse proxy /analytics-api/ → FastAPI
-│   └── src/
-│       ├── pages/                 # 10 React pages (Analytics, Recruiter, Jobs, etc.)
-│       ├── context/AuthContext.js # localStorage token (full OAuth at integration time)
-│       └── config/api.js          # Per-owner service URL config
-├── jmeter/
-│   ├── Dockerfile                 # JMeter 5.6.3 on eclipse-temurin:21-jre-jammy
-│   ├── run_tests.sh               # Waits for API health, runs plans, posts results
-│   └── plans/
-│       ├── scenario_a_ingest.jmx  # 50 threads × 200 loops on /events/ingest
-│       └── scenario_b_queries.jmx # 30 threads × 100 loops on analytics endpoints
-├── scripts/seed_events.py         # Seeds 30 days of cross-owner synthetic events
-├── tests/
-│   ├── test_units.py              # 40 unit tests — no Docker required
-│   └── test_api.py                # API integration tests
-├── docker-compose.yml             # 6 core services + benchmark profile
-├── Dockerfile                     # FastAPI app image
-├── pytest.ini                     # asyncio_mode = auto
-└── requirements.txt
+.
+├── services/
+│   ├── auth-service/          # Owner 1 — FastAPI, RS256 JWT
+│   ├── member-service/        # Owner 2 — Node/Express, Elasticsearch
+│   ├── recruiter-service/     # Owner 3 — Node/Express
+│   ├── job-service/           # Owner 4 — Node/Express, Redis cache
+│   ├── application-service/   # Owner 5 — Node/Express
+│   ├── messaging-service/     # Owner 6 — Node/Express, MongoDB
+│   ├── analytics-service/     # Owner 7 — FastAPI, MongoDB, Kafka host
+│   └── ai-service/            # Owner 8 — FastAPI, LLM agents
+├── frontend/                  # React SPA (connects to all 8 services)
+├── shared/
+│   └── kafka_utils.py         # Shared async Kafka producer/consumer utility
+├── k8s/                       # Kubernetes manifests (k3s on EC2)
+├── scripts/
+│   ├── build-push.sh          # Build + push all Docker images
+│   ├── deploy.sh              # Apply k8s manifests
+│   ├── ec2-setup.sh           # Bootstrap EC2 with k3s
+│   ├── ec2-deploy-service.sh  # Deploy individual service to EC2
+│   ├── ec2-kafka-setup.sh     # Setup shared Kafka on Owner 7 EC2
+│   ├── api-gateway-nginx.conf # Nginx reverse proxy config for EC2
+│   └── seed_events.py         # Seed 30 days of synthetic analytics data
+├── jmeter/                    # JMeter benchmark plans (Scenario A + B)
+├── tests/                     # Owner 7 unit + API integration tests
+├── docker-compose.monorepo.yml  # Full stack local development
+└── .github/workflows/         # CI/CD per owner
 ```
 
 ---
 
-## EC2 Deployment
+## Docker Compose — Full Stack
 
-Owner 7 EC2 hosts both the analytics service and the shared Kafka broker that all other owners connect to.
-
-### Security Group Rules (Owner 7 EC2)
-
-| Port | Protocol | Source | Purpose |
-|---|---|---|---|
-| 19092 | TCP | All owner EC2 IPs | Kafka external access |
-| 8000 | TCP | All owner EC2 IPs + public | Analytics API |
-| 3000 | TCP | Public | React frontend |
-| 8080 | TCP | Team only | Redpanda Console |
-| 27017 | TCP | localhost only | MongoDB (never expose) |
-| 6379 | TCP | localhost only | Redis (never expose) |
-
-### Connecting Other Owners to Kafka
-
-All other owners configure their Kafka producers/consumers with:
-```
-bootstrap.servers = <owner7-ec2-public-ip>:19092
-```
-
-### Inter-Service URL Configuration
-
-When other owners' services are live on EC2, update `frontend/src/config/api.js`:
-
-```js
-const BASE = {
-  analytics:   process.env.REACT_APP_ANALYTICS_URL || 'http://localhost:8000',
-  auth:        process.env.REACT_APP_AUTH_URL      || 'http://<owner1-ec2>:3001',
-  member:      process.env.REACT_APP_MEMBER_URL    || 'http://<owner2-ec2>:3002',
-  recruiter:   process.env.REACT_APP_RECRUITER_URL || 'http://<owner3-ec2>:3003',
-  job:         process.env.REACT_APP_JOB_URL       || 'http://<owner4-ec2>:3004',
-  application: process.env.REACT_APP_APP_URL       || 'http://<owner5-ec2>:3005',
-  messaging:   process.env.REACT_APP_MSG_URL       || 'http://<owner6-ec2>:3006',
-  ai:          process.env.REACT_APP_AI_URL        || 'http://<owner8-ec2>:3008',
-};
-```
-
-Pass EC2 URLs as build args:
 ```bash
-docker compose build \
-  --build-arg REACT_APP_AUTH_URL=http://<owner1-ec2>:3001 \
-  --build-arg REACT_APP_ANALYTICS_URL=http://<owner7-ec2>:8000 \
-  frontend
+# Start everything
+docker compose -f docker-compose.monorepo.yml up -d
+
+# View logs for a specific service
+docker compose -f docker-compose.monorepo.yml logs -f auth-service
+
+# Rebuild a single service after code changes
+docker compose -f docker-compose.monorepo.yml build auth-service
+docker compose -f docker-compose.monorepo.yml up -d --force-recreate auth-service
+
+# Stop everything
+docker compose -f docker-compose.monorepo.yml down
 ```
+
+**Service health check URLs:**
+
+```
+http://localhost:8001/health   # auth
+http://localhost:8002/health   # member
+http://localhost:8003/health   # recruiter
+http://localhost:8004/health   # job
+http://localhost:8005/health   # application
+http://localhost:8006/health   # messaging
+http://localhost:8007/health   # analytics
+http://localhost:8008/health   # ai
+```
+
+---
+
+## AWS Deployment
+
+Each owner deploys their service to their own EC2 instance. Owner 7 additionally hosts the shared Kafka broker.
+
+### Per-Service Deployment
+
+```bash
+# Build and push Docker images
+./scripts/build-push.sh <dockerhub-username>
+
+# Deploy a service to its EC2 instance
+./scripts/ec2-deploy-service.sh <ec2-ip> <service-name> <dockerhub-username>
+
+# Setup shared Kafka on Owner 7 EC2
+./scripts/ec2-kafka-setup.sh <owner7-ec2-ip>
+```
+
+### Kubernetes (k3s) Deployment
+
+```bash
+# Bootstrap EC2 with k3s
+./scripts/ec2-setup.sh <ec2-ip>
+
+# Deploy all k8s manifests
+./scripts/deploy.sh <dockerhub-username>
+```
+
+### Security Group Rules
+
+| Port | Open To | Purpose |
+|---|---|---|
+| 8001–8008 | All owner EC2s + public | Service APIs |
+| 9092 | All owner EC2s | Kafka internal |
+| 29092 | All owner EC2s | Kafka external (Owner 7 only) |
+| 3000 | Public | React frontend |
+| 27017, 6379 | localhost only | MongoDB, Redis (never expose) |
+
+---
+
+## CI/CD
+
+GitHub Actions workflows in `.github/workflows/` handle build, test, and deploy per owner branch.
+
+```yaml
+# Trigger: push to owner branch
+# Steps: build Docker image → push to DockerHub → SSH deploy to EC2
+```
+
+Each owner has their own workflow file (e.g., `deploy-analytics-service.yml` for Owner 7).
+
+---
+
+## Performance Benchmarks
+
+JMeter load tests run against the full stack via Docker:
+
+```bash
+# Run both benchmark scenarios
+docker compose -f docker-compose.monorepo.yml --profile benchmark run --rm jmeter
+
+# Scenario A — ingest stress test
+docker compose -f docker-compose.monorepo.yml --profile benchmark run --rm -e SCENARIO=A jmeter
+
+# Scenario B — analytics query load test
+docker compose -f docker-compose.monorepo.yml --profile benchmark run --rm -e SCENARIO=B jmeter
+```
+
+| Scenario | Endpoint | Threads | Requests | Throughput | Avg Latency | Error Rate |
+|---|---|---|---|---|---|---|
+| A — Ingest | `POST /events/ingest` | 50 | 10,000 | **186 req/s** | 3ms | 0% |
+| B — Queries | Analytics endpoints | 30 | 12,000 | **117 req/s** | 2ms | 0% |
 
 ---
 
 ## Jira Tickets
 
-| Ticket | Week | Summary |
+| Ticket | Owner | Summary |
 |---|---|---|
-| LI-07 | 1 | Freeze event envelope, bootstrap EC2, MongoDB, Redis, Kafka |
-| LI-15 | 2 | Implement `/events/ingest` and placeholder dashboard endpoints |
-| LI-23 | 3 | Build dashboard rollups from Kafka event streams; verify cross-account broker |
-| LI-31 | 4 | Generate dashboard screenshots + benchmark summary exports for presentation |
-
----
-
-## AWS Free-Tier Notes
-
-- Use a single `t2.micro` or `t3.micro` EC2 instance
-- Disable T3 Unlimited mode to avoid CPU-credit charges
-- Use one public IPv4 only — delete idle resources immediately
-- Keep EBS disk small; avoid unnecessary snapshots
-- Do **not** provision NAT Gateway, ALB, or MSK — not needed for a class demo
+| LI-01 | Owner 1 | Auth service — JWT, register, login, JWKS |
+| LI-02 | Owner 2 | Member profile — CRUD, Elasticsearch search |
+| LI-03 | Owner 3 | Recruiter + company management |
+| LI-04 | Owner 4 | Job listings — CRUD, Redis-cached search |
+| LI-05 | Owner 5 | Application lifecycle — submit, status updates |
+| LI-06 | Owner 6 | Messaging + connection graph |
+| LI-07 | Owner 7 | Analytics hub — event ingest, dashboards, Kafka host |
+| LI-08 | Owner 8 | AI agent orchestrator — LLM recommendations, approval flow |
+| LI-15 | Owner 7 | Kafka event envelope standard + cross-service integration |
+| LI-23 | Owner 7 | Dashboard rollups from Kafka streams |
+| LI-31 | Owner 7 | Benchmark report generation + presentation artifacts |
