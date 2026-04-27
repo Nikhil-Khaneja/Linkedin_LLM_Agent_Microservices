@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # Service info
     service_name: str = "job-service"
-    service_port: int = 8004
+    service_port: int = 3004
     debug: bool = False
 
     # Database (MySQL)
