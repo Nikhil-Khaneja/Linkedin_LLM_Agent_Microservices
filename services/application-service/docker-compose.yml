@@ -1,0 +1,97 @@
+version: "3.9"
+
+# ── Owner 5 Application Service — Docker Compose ──────────────────────────────
+# Starts three containers:
+#   1. application-api  — FastAPI on port 8005
+#   2. mysql            — MySQL 8 on port 3307 (host) → 3306 (container)
+#   3. redis            — Redis 7 on port 6385 (host) → 6379 (container)
+#
+# Usage:
+#   docker compose up --build
+#   docker compose down -v   # removes containers and volumes
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── MySQL ──────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: owner5_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE:      application_core
+      MYSQL_USER:          app_user
+      MYSQL_PASSWORD:      app_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Run init SQL automatically on first start
+      - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./seed/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "app_user", "--password=app_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: owner5_redis
+    restart: unless-stopped
+    ports:
+      - "6385:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Application API ────────────────────────────────────────────────────────
+  application-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: owner5_api
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+    environment:
+      # Database — uses service name "mysql" as host inside Docker network
+      DB_HOST:     mysql
+      DB_PORT:     "3306"
+      DB_NAME:     application_core
+      DB_USER:     app_user
+      DB_PASSWORD: app_password
+
+      # Redis — uses service name "redis" as host inside Docker network
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_IDEMPOTENCY_TTL_SECONDS: "86400"
+
+      # Kafka — Owner 7 EC2 public DNS; set via env or .env file.
+      # In standalone mode this can be unreachable — the API still works.
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+
+      # Standalone demo mode — allow unknown job IDs
+      DEMO_ALLOW_UNKNOWN_JOB: ${DEMO_ALLOW_UNKNOWN_JOB:-true}
+
+      # Bearer token for all /applications/* endpoints
+      API_BEARER_TOKEN: ${API_BEARER_TOKEN:-owner5-demo-token}
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
