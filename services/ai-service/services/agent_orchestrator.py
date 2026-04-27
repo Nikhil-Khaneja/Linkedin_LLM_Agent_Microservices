@@ -294,7 +294,7 @@ class AgentOrchestrator:
         return "\n".join(lines)
 
     async def _fetch_job(self, job_id: str, auth_header: str | None = None) -> dict:
-        job_url = os.getenv("JOB_SERVICE_URL", "http://job-service:3004")
+        job_url = os.getenv("JOB_SERVICE_URL", "http://job-service:8004")
         headers = {"Authorization": auth_header} if auth_header else {}
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -306,7 +306,7 @@ class AgentOrchestrator:
         return {"job_id": job_id, "title": "Unknown Job", "skills": []}
 
     async def _fetch_candidates(self, job_id: str, auth_header: str | None = None, page_size: int = 100) -> list:
-        app_url = os.getenv("APPLICATION_SERVICE_URL", "http://application-service:3005")
+        app_url = os.getenv("APPLICATION_SERVICE_URL", "http://application-service:8005")
         headers = {"Authorization": auth_header} if auth_header else {}
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
