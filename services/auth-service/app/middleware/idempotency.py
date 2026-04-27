@@ -11,7 +11,7 @@ from app.services.idempotency_service import (
     get_idempotency_record,
     save_idempotency_response,
 )
-from app.utils.helpers import build_request_hash
+from app.utils.helper import build_request_hash
 
 
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}

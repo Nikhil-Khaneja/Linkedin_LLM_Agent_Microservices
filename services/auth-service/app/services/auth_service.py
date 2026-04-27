@@ -14,7 +14,7 @@ from app.core.security import (
 )
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
-from app.utils.helpers import generate_user_id
+from app.utils.helper import generate_user_id
 
 logger = logging.getLogger(__name__)
 

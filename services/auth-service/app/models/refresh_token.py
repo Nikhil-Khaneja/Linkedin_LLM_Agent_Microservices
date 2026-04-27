@@ -1,14 +1,13 @@
-from sqlalchemy import Column, DateTime, Integer, String, func
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, func
 
 from app.db.base import Base
 
 
-class User(Base):
-    __tablename__ = "users"
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String(50), unique=True, nullable=False, index=True)
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)
-    user_type = Column(String(50), nullable=False)  # member or recruiter
-    created_at = Column(DateTime, server_default=func.now())
+    id         = Column(Integer,    primary_key=True, autoincrement=True)
+    user_id    = Column(String(50), nullable=False, index=True)
+    token      = Column(Text,       nullable=False)
+    is_revoked = Column(Boolean,    default=False, nullable=False)
+    created_at = Column(DateTime,   server_default=func.now())
