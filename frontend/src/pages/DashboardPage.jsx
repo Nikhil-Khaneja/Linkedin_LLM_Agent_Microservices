@@ -23,7 +23,7 @@ export default function DashboardPage() {
   React.useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (!token) return;
-    fetch('http://localhost:3005/applications/byMember', {
+    fetch(`${BASE.application}/applications/byMember`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
       body: JSON.stringify({})

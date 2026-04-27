@@ -1,0 +1,93 @@
+# =============================================================================
+# PHASE 6 — GitHub Actions CI/CD Template (AUTOMATED BY AI)
+# =============================================================================
+# Copy this file and rename it for each service, e.g.:
+#   deploy-auth-service.yml
+#   deploy-job-service.yml
+#
+# MANUAL STEPS REQUIRED (per service repo/owner):
+# Add these GitHub Secrets under Settings → Secrets → Actions:
+#   EC2_HOST        — public IP or DNS of the EC2 instance
+#   EC2_USER        — ec2-user (Amazon Linux) or ubuntu (Ubuntu)
+#   EC2_SSH_KEY     — private key contents (-----BEGIN RSA PRIVATE KEY-----)
+#   REPO_URL        — https://github.com/YOUR_ORG/linkedin-monorepo.git
+# =============================================================================
+
+name: Deploy <SERVICE_NAME>         # MANUAL: replace <SERVICE_NAME>
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/<SERVICE_DIR>/**"  # MANUAL: replace <SERVICE_DIR>
+      - ".github/workflows/deploy-<SERVICE_NAME>.yml"
+
+env:
+  SERVICE_DIR: "<SERVICE_DIR>"       # MANUAL: e.g. auth-service
+  SERVICE_PORT: "<SERVICE_PORT>"     # MANUAL: e.g. 8001
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 to known hosts
+        run: ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          REPO_URL: ${{ secrets.REPO_URL }}
+        run: |
+          ssh "$EC2_USER@$EC2_HOST" bash -s <<'REMOTE'
+            set -euo pipefail
+            APP_DIR="/opt/linkedin/${{ env.SERVICE_DIR }}"
+
+            # Pull latest code
+            if [ -d "$APP_DIR/.git" ]; then
+              git -C "$APP_DIR" fetch origin
+              git -C "$APP_DIR" reset --hard origin/main
+            else
+              mkdir -p "$(dirname $APP_DIR)"
+              git clone --depth 1 "${{ env.REPO_URL }}" "$APP_DIR"
+            fi
+
+            # Rebuild image
+            docker build \
+              -t "linkedin-${{ env.SERVICE_DIR }}:latest" \
+              "$APP_DIR/services/${{ env.SERVICE_DIR }}"
+
+            # Restart container
+            docker stop "linkedin-${{ env.SERVICE_DIR }}" 2>/dev/null || true
+            docker rm   "linkedin-${{ env.SERVICE_DIR }}" 2>/dev/null || true
+
+            ENV_FLAG=""
+            ENV_FILE="$APP_DIR/services/${{ env.SERVICE_DIR }}/.env"
+            [ -f "$ENV_FILE" ] && ENV_FLAG="--env-file $ENV_FILE"
+
+            docker run -d \
+              --name "linkedin-${{ env.SERVICE_DIR }}" \
+              --restart unless-stopped \
+              -p "${{ env.SERVICE_PORT }}:${{ env.SERVICE_PORT }}" \
+              $ENV_FLAG \
+              "linkedin-${{ env.SERVICE_DIR }}:latest"
+
+            sleep 5
+            curl -sf "http://localhost:${{ env.SERVICE_PORT }}/health" \
+              && echo "Health check passed" \
+              || (echo "Health check failed"; docker logs --tail 30 "linkedin-${{ env.SERVICE_DIR }}"; exit 1)
+          REMOTE
+
+      - name: Notify success
+        if: success()
+        run: echo "${{ env.SERVICE_DIR }} deployed successfully to ${{ secrets.EC2_HOST }}:${{ env.SERVICE_PORT }}"

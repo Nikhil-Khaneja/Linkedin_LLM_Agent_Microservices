@@ -19,7 +19,7 @@ export default function JobDetailPage() {
     const token = localStorage.getItem('access_token');
     if (!token) return;
     const jobId = window.location.pathname.split('/').pop();
-    fetch('http://localhost:3004/jobs/saved', {
+    fetch(`${BASE.job}/jobs/saved`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
       body: JSON.stringify({})
@@ -39,7 +39,7 @@ export default function JobDetailPage() {
     const jobId = window.location.pathname.split('/').pop();
     const endpoint = isSaved ? 'unsave' : 'save';
     try {
-      const r = await fetch(`http://localhost:3004/jobs/${endpoint}`, {
+      const r = await fetch(`${BASE.job}/jobs/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
         body: JSON.stringify({ job_id: jobId })

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x \"/Users/spartan/Documents/Distrtibuted/Linkedin /owner7-analytics-service/scripts/ec2-setup.sh\" \"/Users/spartan/Documents/Distrtibuted/Linkedin /owner7-analytics-service/scripts/deploy.sh\")",
+      "Bash(git ls-tree *)"
+    ]
+  }
+}

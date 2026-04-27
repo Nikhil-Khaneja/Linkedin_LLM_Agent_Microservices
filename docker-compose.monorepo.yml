@@ -1,0 +1,474 @@
+# =============================================================================
+# PHASE 3 — Monorepo root docker-compose (AUTOMATED BY AI)
+# =============================================================================
+# Runs the full LinkedIn simulation stack locally.
+#
+# Services:
+#   Infrastructure:  kafka, zookeeper, mysql-*, mongodb, redis
+#   Microservices:   auth(8001) member(8002) recruiter(8003) job(8004)
+#                    application(8005) analytics(8007) ai(8008)
+#   Frontend:        frontend (3000)
+#
+# Usage:
+#   docker compose -f docker-compose.monorepo.yml up --build
+#   docker compose -f docker-compose.monorepo.yml down -v
+# =============================================================================
+
+version: "3.9"
+
+x-common-env: &kafka-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  linkedin-net:
+    driver: bridge
+
+volumes:
+  mysql-auth-data:
+  mysql-member-data:
+  mysql-recruiter-data:
+  mysql-job-data:
+  mysql-app-data:
+  mongo-data:
+  redis-data:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
+
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: linkedin-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | timeout 2 nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    <<: *restart
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: linkedin-kafka
+    depends_on:
+      zookeeper: { condition: service_healthy }
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    <<: *restart
+
+  # Shared Redis
+  redis:
+    image: redis:7-alpine
+    container_name: linkedin-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    <<: *restart
+
+  # Shared MongoDB (for analytics + AI)
+  mongodb:
+    image: mongo:7.0
+    container_name: linkedin-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpass
+    volumes:
+      - mongo-data:/data/db
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    <<: *restart
+
+  # MySQL for auth-service (owner1)
+  mysql-auth:
+    image: mysql:8.0
+    container_name: linkedin-mysql-auth
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: auth_access
+      MYSQL_USER: auth_user
+      MYSQL_PASSWORD: auth_pass
+    ports:
+      - "3301:3306"
+    volumes:
+      - mysql-auth-data:/var/lib/mysql
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    <<: *restart
+
+  # MySQL for member-service (owner2) — MANUAL STEPS REQUIRED: add schema
+  mysql-member:
+    image: mysql:8.0
+    container_name: linkedin-mysql-member
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: member_core
+      MYSQL_USER: member_user
+      MYSQL_PASSWORD: member_pass
+    ports:
+      - "3302:3306"
+    volumes:
+      - mysql-member-data:/var/lib/mysql
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    <<: *restart
+
+  # MySQL for recruiter-service (owner3)
+  mysql-recruiter:
+    image: mysql:8.0
+    container_name: linkedin-mysql-recruiter
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: recruiter_core
+      MYSQL_USER: recruiter_user
+      MYSQL_PASSWORD: recruiter_pass
+    ports:
+      - "3303:3306"
+    volumes:
+      - mysql-recruiter-data:/var/lib/mysql
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    <<: *restart
+
+  # MySQL for job-service (owner4)
+  mysql-job:
+    image: mysql:8.0
+    container_name: linkedin-mysql-job
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: job_core
+      MYSQL_USER: job_user
+      MYSQL_PASSWORD: job_pass
+    ports:
+      - "3304:3306"
+    volumes:
+      - mysql-job-data:/var/lib/mysql
+      # MANUAL STEPS REQUIRED: mount schema if services/job-service/sql/schema.sql exists
+      # - ./services/job-service/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    <<: *restart
+
+  # MySQL for application-service (owner5)
+  mysql-app:
+    image: mysql:8.0
+    container_name: linkedin-mysql-app
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: application_core
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_pass
+    ports:
+      - "3305:3306"
+    volumes:
+      - mysql-app-data:/var/lib/mysql
+      # MANUAL STEPS REQUIRED: uncomment if migrations exist
+      # - ./services/application-service/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    <<: *restart
+
+# ── Microservices ─────────────────────────────────────────────────────────────
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: linkedin-auth
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *kafka-env
+      DB_HOST: mysql-auth
+      DB_PORT: 3306
+      DB_USER: auth_user
+      DB_PASSWORD: auth_pass
+      DB_NAME: auth_access
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVICE_PORT: 8001
+      ENV: development
+    depends_on:
+      mysql-auth: { condition: service_healthy }
+      redis:      { condition: service_healthy }
+      kafka:      { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
+  member-service:
+    build:
+      context: ./services/member-service
+      dockerfile: Dockerfile
+    container_name: linkedin-member
+    ports:
+      - "8002:8002"
+    environment:
+      <<: *kafka-env
+      DB_HOST: mysql-member
+      DB_PORT: 3306
+      DB_USER: member_user
+      DB_PASSWORD: member_pass
+      DB_NAME: member_core
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVICE_PORT: 8002
+      AUTH_JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+    depends_on:
+      mysql-member: { condition: service_healthy }
+      redis:        { condition: service_healthy }
+      kafka:        { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
+  recruiter-service:
+    build:
+      context: ./services/recruiter-service
+      dockerfile: Dockerfile
+    container_name: linkedin-recruiter
+    ports:
+      - "8003:8003"
+    environment:
+      PORT: 8003
+      DB_HOST: mysql-recruiter
+      DB_PORT: 3306
+      DB_USER: recruiter_user
+      DB_PASSWORD: recruiter_pass
+      DB_NAME: recruiter_core
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:9092
+      JWT_SECRET: change_me_in_production
+    depends_on:
+      mysql-recruiter: { condition: service_healthy }
+      redis:           { condition: service_healthy }
+      kafka:           { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
+  job-service:
+    build:
+      context: ./services/job-service
+      dockerfile: Dockerfile
+    container_name: linkedin-job
+    ports:
+      - "8004:8004"
+    environment:
+      <<: *kafka-env
+      DATABASE_HOST: mysql-job
+      DATABASE_PORT: 3306
+      DATABASE_USER: job_user
+      DATABASE_PASSWORD: job_pass
+      DATABASE_NAME: job_core
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+      SERVICE_PORT: 8004
+    depends_on:
+      mysql-job:    { condition: service_healthy }
+      redis:        { condition: service_healthy }
+      kafka:        { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
+  application-service:
+    build:
+      context: ./services/application-service
+      dockerfile: Dockerfile
+    container_name: linkedin-application
+    ports:
+      - "8005:8005"
+    environment:
+      <<: *kafka-env
+      DB_HOST: mysql-app
+      DB_PORT: 3306
+      DB_USER: app_user
+      DB_PASSWORD: app_pass
+      DB_NAME: application_core
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVICE_PORT: 8005
+      AUTH_JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+    depends_on:
+      mysql-app:    { condition: service_healthy }
+      redis:        { condition: service_healthy }
+      kafka:        { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    container_name: linkedin-analytics
+    ports:
+      - "8007:8007"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MONGODB_URL: mongodb://admin:adminpass@mongodb:27017
+      MONGODB_DB: analytics
+      REDIS_URL: redis://redis:6379/0
+      ENV: development
+      SERVICE_PORT: 8007
+    depends_on:
+      kafka:   { condition: service_healthy }
+      mongodb: { condition: service_healthy }
+      redis:   { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    container_name: linkedin-ai
+    ports:
+      - "8008:8008"
+    environment:
+      PORT: 8008
+      MONGODB_URI: mongodb://admin:adminpass@mongodb:27017/linkedin_nosql?authSource=admin
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      AUTH_SERVICE_JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+      MEMBER_SERVICE_URL: http://member-service:8002
+      JOB_SERVICE_URL: http://job-service:8004
+      APPLICATION_SERVICE_URL: http://application-service:8005
+      # MANUAL STEPS REQUIRED: add your OpenAI key
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      kafka:   { condition: service_healthy }
+      mongodb: { condition: service_healthy }
+      redis:   { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_AUTH_URL: http://localhost:8001
+        REACT_APP_MEMBER_URL: http://localhost:8002
+        REACT_APP_RECRUITER_URL: http://localhost:8003
+        REACT_APP_JOB_URL: http://localhost:8004
+        REACT_APP_APP_URL: http://localhost:8005
+        REACT_APP_ANALYTICS_URL: http://localhost:8007
+        REACT_APP_AI_URL: http://localhost:8008
+    container_name: linkedin-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - auth-service
+      - job-service
+    networks: [linkedin-net]
+    <<: *restart

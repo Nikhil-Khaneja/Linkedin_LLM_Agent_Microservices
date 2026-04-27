@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: owner7-config
+  namespace: owner7
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  MONGODB_URL: "mongodb://mongodb:27017"
+  MONGODB_DB: "analytics"
+  REDIS_URL: "redis://redis:6379/0"
+  ENV: "production"
+  SERVICE_NAME: "owner7-analytics"
+  LOG_LEVEL: "INFO"

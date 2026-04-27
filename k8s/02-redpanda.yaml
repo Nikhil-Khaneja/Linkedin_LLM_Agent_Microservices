@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redpanda-data
+  namespace: owner7
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda
+  namespace: owner7
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda
+  template:
+    metadata:
+      labels:
+        app: redpanda
+    spec:
+      containers:
+        - name: redpanda
+          image: docker.redpanda.com/redpandadata/redpanda:v23.3.6
+          command:
+            - redpanda
+            - start
+            - --kafka-addr
+            - internal://0.0.0.0:9092,external://0.0.0.0:19092
+            - --advertise-kafka-addr
+            - internal://redpanda:9092,external://redpanda:19092
+            - --smp
+            - "1"
+            - --memory
+            - 256M
+            - --overprovisioned
+            - --default-log-level=warn
+          ports:
+            - containerPort: 9092
+            - containerPort: 19092
+            - containerPort: 8081
+            - containerPort: 9644
+          volumeMounts:
+            - name: redpanda-data
+              mountPath: /var/lib/redpanda/data
+          readinessProbe:
+            exec:
+              command: ["rpk", "cluster", "health"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "300Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: redpanda-data
+          persistentVolumeClaim:
+            claimName: redpanda-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  namespace: owner7
+spec:
+  selector:
+    app: redpanda
+  ports:
+    - name: kafka-internal
+      port: 9092
+      targetPort: 9092
+    - name: kafka-external
+      port: 19092
+      targetPort: 19092
+    - name: schema-registry
+      port: 8081
+      targetPort: 8081
+    - name: admin
+      port: 9644
+      targetPort: 9644
