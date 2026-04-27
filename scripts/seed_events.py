@@ -15,12 +15,12 @@ import uuid
 import httpx
 from datetime import datetime, timedelta
 
-API_BASE = "http://localhost:8000"
+API_BASE = "http://localhost:8007"
 
 # ── Fake data pools ───────────────────────────────────────────────
-MEMBERS = [f"mem_{i}" for i in range(100, 600)]
+MEMBERS = [f"mem_{i:04d}" for i in range(1, 101)]      # mem_0001–mem_0100
 RECRUITERS = [f"rec_{i}" for i in range(100, 200)]
-JOBS = [f"job_{i}" for i in range(3000, 3500)]
+JOBS = [f"job_{i:04d}" for i in range(1, 51)]           # job_0001–job_0050
 LOCATIONS = [
     "San Jose, CA", "New York, NY", "Austin, TX", "Seattle, WA",
     "Chicago, IL", "Denver, CO", "Boston, MA", "Miami, FL",
@@ -284,9 +284,14 @@ async def seed_via_kafka(count: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Seed mock events for Owner 7 Analytics")
+    parser.add_argument("--url", default=API_BASE, help="Base URL of analytics service (default: http://localhost:8007)")
     parser.add_argument("--count", type=int, default=500, help="Number of events to generate")
+    parser.add_argument("--days", type=int, default=30, help="Lookback window in days for event timestamps")
     parser.add_argument("--mode", choices=["http", "kafka"], default="http", help="Delivery mode")
     args = parser.parse_args()
+
+    # Allow --url to override the module-level constant used in seed_via_http
+    API_BASE = args.url.rstrip("/")
 
     asyncio.run(
         seed_via_http(args.count) if args.mode == "http" else seed_via_kafka(args.count)

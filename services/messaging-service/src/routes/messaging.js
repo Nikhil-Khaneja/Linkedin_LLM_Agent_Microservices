@@ -2,6 +2,7 @@ const router=require('express').Router();
 const {v4:uuidv4}=require('uuid');
 const {getDB}=require('../db/mysql');
 const {getMongoDB}=require('../db/mongodb');
+const {getRedis}=require('../db/redis');
 const {publishEvent}=require('../kafka/producer');
 const {requireAuth}=require('../middleware/auth');
 const {AppError}=require('../middleware/errorHandler');

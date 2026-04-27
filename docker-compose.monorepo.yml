@@ -184,6 +184,7 @@ services:
     ports:
       - "3303:3306"
     volumes:
+      - ./services/recruiter-service/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - mysql-recruiter-data:/var/lib/mysql
     networks: [linkedin-net]
     healthcheck:
@@ -462,8 +463,9 @@ services:
       MYSQL_USER: messaging_user
       MYSQL_PASSWORD: messaging_pass
     ports:
-      - "3306:3307"
+      - "3307:3306"
     volumes:
+      - ./services/messaging-service/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - mysql-messaging-data:/var/lib/mysql
     networks: [linkedin-net]
     healthcheck:
