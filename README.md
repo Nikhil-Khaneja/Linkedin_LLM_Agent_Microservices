@@ -139,3 +139,5 @@ job-service/
 - **Owner 5**: Consumes `job.closed` events
 - **Owner 7**: Kafka broker + analytics
 - **Owner 8**: AI agent consumes job data
+
+
