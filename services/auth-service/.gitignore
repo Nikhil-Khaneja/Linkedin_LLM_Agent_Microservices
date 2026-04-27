@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.env
+test_auth.db
+.idea/
+.DS_Store
+app.log
+private_key.pem
+public_key.pem

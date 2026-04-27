@@ -1,0 +1,55 @@
+# AUTOMATED BY AI — Ready-to-use workflow for owner7 analytics-service.
+# MANUAL STEPS REQUIRED: add EC2_HOST, EC2_USER, EC2_SSH_KEY, REPO_URL secrets.
+
+name: Deploy analytics-service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/analytics-service/**"
+      - ".github/workflows/deploy-analytics-service.yml"
+
+env:
+  SERVICE_DIR: analytics-service
+  SERVICE_PORT: "8007"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 to known hosts
+        run: ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on EC2
+        run: |
+          ssh "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash -s <<'REMOTE'
+            set -euo pipefail
+            APP_DIR="/opt/linkedin/analytics-service"
+            REPO="${{ secrets.REPO_URL }}"
+
+            if [ -d "$APP_DIR/.git" ]; then
+              git -C "$APP_DIR" fetch origin && git -C "$APP_DIR" reset --hard origin/main
+            else
+              mkdir -p "$(dirname $APP_DIR)" && git clone --depth 1 "$REPO" "$APP_DIR"
+            fi
+
+            docker build -t linkedin-analytics-service:latest "$APP_DIR/services/analytics-service"
+            docker stop linkedin-analytics-service 2>/dev/null || true
+            docker rm   linkedin-analytics-service 2>/dev/null || true
+
+            ENV_FILE="$APP_DIR/services/analytics-service/.env"
+            ENV_FLAG=""; [ -f "$ENV_FILE" ] && ENV_FLAG="--env-file $ENV_FILE"
+            docker run -d --name linkedin-analytics-service --restart unless-stopped \
+              -p 8007:8007 $ENV_FLAG linkedin-analytics-service:latest
+
+            sleep 5
+            curl -sf http://localhost:8007/health && echo "OK" || exit 1
+          REMOTE

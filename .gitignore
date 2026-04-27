@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.DS_Store
+.pytest_cache/
+jmeter/results/
+jmeter/report_*/
+jmeter/results_scenario_*.csv
+jmeter.log
+node_modules/
+frontend/build/
+*.egg-info/
+dist/
