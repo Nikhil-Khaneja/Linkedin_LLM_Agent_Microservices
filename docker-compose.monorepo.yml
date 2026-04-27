@@ -32,11 +32,13 @@ volumes:
   mysql-recruiter-data:
   mysql-job-data:
   mysql-app-data:
+  mysql-messaging-data:
   mongo-data:
   redis-data:
   kafka-data:
   zookeeper-data:
   zookeeper-log:
+  es-data:
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -286,12 +288,15 @@ services:
       DB_NAME: member_core
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      PORT: 8002
       SERVICE_PORT: 8002
       AUTH_JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+      ELASTICSEARCH_URL: http://elasticsearch:9200
     depends_on:
-      mysql-member: { condition: service_healthy }
-      redis:        { condition: service_healthy }
-      kafka:        { condition: service_healthy }
+      mysql-member:    { condition: service_healthy }
+      redis:           { condition: service_healthy }
+      kafka:           { condition: service_healthy }
+      elasticsearch:   { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
@@ -452,6 +457,82 @@ services:
       start_period: 20s
     <<: *restart
 
+  # MySQL for messaging-service (owner6)
+  mysql-messaging:
+    image: mysql:8.0
+    container_name: linkedin-mysql-messaging
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: messaging_core
+      MYSQL_USER: messaging_user
+      MYSQL_PASSWORD: messaging_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-messaging-data:/var/lib/mysql
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    <<: *restart
+
+  # Elasticsearch for member-service search (owner2)
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: linkedin-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    <<: *restart
+
+  messaging-service:
+    build:
+      context: ./services/messaging-service
+      dockerfile: Dockerfile
+    container_name: linkedin-messaging
+    ports:
+      - "8006:8006"
+    environment:
+      PORT: 8006
+      DB_HOST: mysql-messaging
+      DB_PORT: 3306
+      DB_USER: messaging_user
+      DB_PASSWORD: messaging_pass
+      DB_NAME: messaging_core
+      MONGODB_URI: mongodb://admin:adminpass@mongodb:27017/messaging?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:9092
+      JWT_SECRET: change_me_in_production
+    depends_on:
+      mysql-messaging: { condition: service_healthy }
+      mongodb:         { condition: service_healthy }
+      redis:           { condition: service_healthy }
+      kafka:           { condition: service_healthy }
+    networks: [linkedin-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    <<: *restart
+
   frontend:
     build:
       context: ./frontend
@@ -462,6 +543,7 @@ services:
         REACT_APP_RECRUITER_URL: http://localhost:8003
         REACT_APP_JOB_URL: http://localhost:8004
         REACT_APP_APP_URL: http://localhost:8005
+        REACT_APP_MESSAGING_URL: http://localhost:8006
         REACT_APP_ANALYTICS_URL: http://localhost:8007
         REACT_APP_AI_URL: http://localhost:8008
     container_name: linkedin-frontend
@@ -470,5 +552,6 @@ services:
     depends_on:
       - auth-service
       - job-service
+      - messaging-service
     networks: [linkedin-net]
     <<: *restart
