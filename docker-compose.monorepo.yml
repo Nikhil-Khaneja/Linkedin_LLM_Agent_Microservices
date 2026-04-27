@@ -263,9 +263,9 @@ services:
       kafka:      { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=4)"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
       start_period: 20s
     <<: *restart
@@ -286,7 +286,7 @@ services:
       MYSQL_DATABASE: member_core
       REDIS_URL: redis://redis:6379
       PORT: 8002
-      AUTH_JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+      AUTH_SERVICE_JWKS_URL: http://auth-service:8001/.well-known/jwks.json
       ELASTICSEARCH_URL: http://elasticsearch:9200
     depends_on:
       mysql-member:    { condition: service_healthy }
@@ -295,11 +295,11 @@ services:
       elasticsearch:   { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8002/health"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     <<: *restart
 
   recruiter-service:
@@ -325,11 +325,11 @@ services:
       kafka:           { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8003/health"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     <<: *restart
 
   job-service:
@@ -348,7 +348,8 @@ services:
       DATABASE_NAME: job_core
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+      JWKS_URL: http://auth-service:8001/.well-known/jwks.json
+      AUTH_SERVICE_JWKS_URL: http://auth-service:8001/.well-known/jwks.json
       SERVICE_PORT: 8004
     depends_on:
       mysql-job:    { condition: service_healthy }
@@ -356,11 +357,11 @@ services:
       kafka:        { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8004/health"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     <<: *restart
 
   application-service:
@@ -381,18 +382,18 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       SERVICE_PORT: 8005
-      AUTH_JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+      AUTH_JWKS_URL: http://auth-service:8001/.well-known/jwks.json
     depends_on:
       mysql-app:    { condition: service_healthy }
       redis:        { condition: service_healthy }
       kafka:        { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8005/health"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     <<: *restart
 
   analytics-service:
@@ -415,9 +416,9 @@ services:
       redis:   { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8007/health', timeout=4)"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
       start_period: 20s
     <<: *restart
@@ -434,7 +435,7 @@ services:
       MONGODB_URI: mongodb://admin:adminpass@mongodb:27017/linkedin_nosql?authSource=admin
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:9092
-      AUTH_SERVICE_JWKS_URL: http://auth-service:8001/api/v1/.well-known/jwks.json
+      AUTH_SERVICE_JWKS_URL: http://auth-service:8001/.well-known/jwks.json
       MEMBER_SERVICE_URL: http://member-service:8002
       JOB_SERVICE_URL: http://job-service:8004
       APPLICATION_SERVICE_URL: http://application-service:8005
@@ -446,9 +447,9 @@ services:
       redis:   { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/health', timeout=4)"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
       start_period: 20s
     <<: *restart
@@ -524,11 +525,11 @@ services:
       kafka:           { condition: service_healthy }
     networks: [linkedin-net]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8006/health"]
       interval: 15s
-      timeout: 5s
+      timeout: 8s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     <<: *restart
 
   frontend:
@@ -536,7 +537,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        REACT_APP_AUTH_URL: http://localhost:8001
+        REACT_APP_AUTH_URL: http://localhost:18001
         REACT_APP_MEMBER_URL: http://localhost:8002
         REACT_APP_RECRUITER_URL: http://localhost:8003
         REACT_APP_JOB_URL: http://localhost:8004

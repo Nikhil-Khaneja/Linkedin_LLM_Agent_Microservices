@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     kafka_client_id: str = "job-service"
 
     # JWT/Auth
-    jwks_url: str = "http://localhost:8001/api/v1/.well-known/jwks.json"
+    jwks_url: str = "http://localhost:8001/.well-known/jwks.json"
     jwt_algorithm: str = "RS256"
 
     @property
