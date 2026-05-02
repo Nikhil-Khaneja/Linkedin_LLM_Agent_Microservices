@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: owner_services
+    metrics_path: /ops/metrics
+    static_configs:
+      - targets:
+          - auth_service:8001
+          - member_profile_service:8002
+          - recruiter_company_service:8003
+          - jobs_service:8004
+          - applications_service:8005
+          - messaging_connections_service:8006
+          - analytics_service:8007
+          - ai_orchestrator_service:8008

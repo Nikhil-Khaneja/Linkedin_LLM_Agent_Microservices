@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-linkedin_sim}
+  redis:
+    image: redis:7
+  app:
+    image: ${IMAGE_NAME:-linkedin-clone-backend:latest}
+    command: uvicorn services.auth_service.app.main:app --host 0.0.0.0 --port 8001
+    env_file:
+      - .env.aws
+    depends_on:
+      - mysql
+      - redis
+    ports:
+      - "8001:8001"

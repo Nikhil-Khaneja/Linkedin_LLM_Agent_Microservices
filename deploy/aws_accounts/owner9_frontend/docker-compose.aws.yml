@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+  frontend:
+    image: node:20
+    working_dir: /web
+    command: sh -lc "npm ci && npm run build && npm run preview -- --host 0.0.0.0 --port 4173"
+    volumes:
+      - ../../../frontend:/web
+    env_file:
+      - .env.aws
+    ports:
+      - "4173:4173"

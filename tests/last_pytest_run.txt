@@ -1,0 +1,107 @@
+.....                                                                    [100%]
+=============================== warnings summary ===============================
+../../../opt/pyvenv/lib/python3.13/site-packages/ddtrace/internal/module.py:313
+  /opt/pyvenv/lib/python3.13/site-packages/ddtrace/internal/module.py:313: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    self.loader.exec_module(module)
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/jobs_service/app/main.py:12: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('startup')
+
+tests/api/test_end_to_end.py: 10 warnings
+  /opt/pyvenv/lib/python3.13/site-packages/fastapi/applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/jobs_service/app/main.py:16: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/applications_service/app/main.py:12: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('startup')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/applications_service/app/main.py:16: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/messaging_connections_service/app/main.py:12: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('startup')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/messaging_connections_service/app/main.py:16: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/analytics_service/app/main.py:12: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('startup')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/analytics_service/app/main.py:16: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/ai_orchestrator_service/app/main.py:12: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('startup')
+
+tests/api/test_end_to_end.py::test_full_system_flow
+  /mnt/data/finalproj_all_services_refactored/backend/services/ai_orchestrator_service/app/main.py:16: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+5 passed, 21 warnings in 3.59s

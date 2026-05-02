@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  mongo:
+    image: mongo:7
+  redis:
+    image: redis:7
+  app:
+    image: ${IMAGE_NAME:-linkedin-clone-backend:latest}
+    command: uvicorn services.ai_orchestrator_service.app.main:app --host 0.0.0.0 --port 8008
+    env_file:
+      - .env.aws
+    depends_on:
+      - mongo
+      - redis
+    ports:
+      - "8008:8008"

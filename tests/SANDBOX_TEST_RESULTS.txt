@@ -1,0 +1,8 @@
+Backend compile: PASS
+API tests: PASS (5 passed)
+Cross-account config validation: PASS
+Frontend production bundle: PASS (static bundle generated in frontend/dist)
+Notes:
+- Owners 4 and 5 now use a relational transactional outbox path.
+- Owners 6 and 8 now use a durable document outbox plus background dispatch.
+- Owner 7 reads dashboards from materialized rollups in events_rollup.

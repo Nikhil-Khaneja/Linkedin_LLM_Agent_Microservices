@@ -1,0 +1,1 @@
+Static frontend bundle ready in frontend/dist

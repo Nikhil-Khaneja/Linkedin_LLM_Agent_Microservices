@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+!.env.example
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.next/
+.npm/
+.yarn/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+
+# Docker volumes / local data
+*.log
+*.pid
+
+# MinIO local data
+minio_data/
+
+# JMeter results (raw)
+tests/jmeter/*.jtl
+tests/jmeter/results/
+
+# Secrets — never commit
+*.pem
+*.key
+*.p12
+secrets/
+.secrets/
