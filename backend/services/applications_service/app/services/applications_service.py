@@ -65,7 +65,7 @@ class ApplicationsService:
             return fail('idempotency_conflict', 'Same Idempotency-Key reused with different apply payload.', trc, status_code=409)
         if existing:
             log_event(self.logger, 'application_submit_idempotency_replay', trace_id=trc, action='submit', route=route, member_id=member_id, job_id=job_id, idempotency_key=key, application_id=((existing or {}).get('data') or {}).get('application_id'))
-            return success(existing['data'], existing['trace_id'], existing.get('meta'))
+            return success(existing['data'], existing['trace_id'], existing.get('meta'), status_code=202)
 
         if not job_id:
             log_event(self.logger, 'application_submit_validation_failed', trace_id=trc, action='submit', route=route, member_id=member_id, error_code='validation_error', validation_field='job_id')
@@ -118,7 +118,7 @@ class ApplicationsService:
         response = {'trace_id': trc, 'data': {'application_id': row['application_id'], 'job_id': row.get('job_id'), 'member_id': row.get('member_id'), 'status': 'submitted', 'application_datetime': row.get('application_datetime') or applied_at}, 'meta': meta}
         record_idempotency(route, key, h, response)
         log_event(self.logger, 'application_submit_succeeded', trace_id=trc, action='submit', route=route, application_id=row['application_id'], member_id=row.get('member_id'), job_id=row.get('job_id'), status='submitted', idempotency_key=key)
-        return success(response['data'], trc, response['meta'])
+        return success(response['data'], trc, response['meta'], status_code=202)
 
     def start_application(self, payload, authorization, trc):
         try:

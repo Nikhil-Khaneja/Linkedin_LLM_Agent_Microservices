@@ -5,22 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from pymongo import MongoClient
+from services.shared.document_store import insert_one as _ds_insert, find_many as _ds_find
 
-_CLIENT = None
-
-
-def _mongo():
-    global _CLIENT
-    if _CLIENT is None:
-        uri = os.environ.get('MONGO_URI') or os.environ.get('MONGO_URL') or 'mongodb://mongo:27017'
-        _CLIENT = MongoClient(uri)
-    db_name = os.environ.get('MONGO_DATABASE', 'linkedin_sim')
-    return _CLIENT[db_name]
-
-
-def notifications_collection():
-    return _mongo()['notifications']
+_COLLECTION = 'notifications'
 
 
 def create_notification(
@@ -47,5 +34,13 @@ def create_notification(
         'is_read': False,
         'created_at': datetime.now(timezone.utc).isoformat(),
     }
-    notifications_collection().insert_one(doc)
+    _ds_insert(_COLLECTION, doc)
     return {**doc, 'notification_id': doc['_id']}
+
+
+def list_notifications(member_id: str, page_size: int = 30) -> list[dict[str, Any]]:
+    docs = _ds_find(_COLLECTION, {'member_id': member_id}, sort=[('created_at', -1)])
+    docs = docs[:page_size]
+    for d in docs:
+        d['notification_id'] = d.get('notification_id') or d.pop('_id', None)
+    return docs

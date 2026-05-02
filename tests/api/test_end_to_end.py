@@ -51,7 +51,7 @@ def test_full_system_flow(clients):
         'job_id': job_id, 'member_id': 'mem_501', 'resume_ref': 'resume-501.pdf', 'cover_letter': 'Excited to apply.',
         'idempotency_key': f'mem501-{job_id}-v1', 'city': 'San Jose'
     })
-    assert r.status_code == 200
+    assert r.status_code == 202
     app_id = r.json()['data']['application_id']
     assert o5.post('/applications/get', headers=member_runtime_headers, json={'application_id': app_id}).status_code == 200
     assert o5.post('/applications/byMember', headers=member_runtime_headers, json={'member_id': 'mem_501'}).status_code == 200
@@ -89,10 +89,10 @@ def test_full_system_flow(clients):
         res = o8.get(f'/ai/tasks/{task_id}', headers=RECRUITER)
         assert res.status_code == 200
         status = res.json()['data']['status']
-        if status == 'waiting_for_approval':
+        if status == 'awaiting_approval':
             break
         time.sleep(0.25)
-    assert status == 'waiting_for_approval'
+    assert status == 'awaiting_approval'
     approve = o8.post(f'/ai/tasks/{task_id}/approve', headers=RECRUITER, json={'edits': 'Hi Ava, your profile looks strong for this role.'})
     assert approve.status_code == 200
     final_task = o8.get(f'/ai/tasks/{task_id}', headers=RECRUITER)

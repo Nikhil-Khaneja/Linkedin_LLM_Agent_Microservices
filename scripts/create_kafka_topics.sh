@@ -34,6 +34,13 @@ topics=(
   ai.rejected
   member.media.uploaded
   profile.viewed
+  dlq.application.submitted
+  dlq.application.status.updated
+  dlq.message.sent
+  dlq.connection.requested
+  dlq.connection.accepted
+  dlq.job.created
+  dlq.ai.requests
 )
 
 for topic in "${topics[@]}"; do

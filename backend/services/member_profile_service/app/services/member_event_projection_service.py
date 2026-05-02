@@ -41,7 +41,11 @@ class MemberEventProjectionService:
     async def startup(self) -> None:
         if self.tasks:
             return
-        topics = ['connection.requested', 'connection.accepted', 'connection.rejected', 'connection.withdrawn', 'message.sent']
+        topics = [
+            'connection.requested', 'connection.accepted', 'connection.rejected', 'connection.withdrawn',
+            'message.sent',
+            'application.submitted', 'application.status.updated',
+        ]
         self.tasks.append(asyncio.create_task(consume_forever(topics, 'member-profile-projections', self.process_event, self.stop_event)))
         log_event(self.logger, 'member_event_projection_startup', topics=topics, consumer_group='member-profile-projections')
 
@@ -202,6 +206,45 @@ class MemberEventProjectionService:
                 )
         elif topic == 'connection.withdrawn':
             self._upsert_connection_projection(topic, payload, actor_id)
+        elif topic == 'application.submitted':
+            member_id = payload.get('member_id')
+            job_id = payload.get('job_id')
+            if member_id:
+                job_row = fetch_one(
+                    'SELECT title, recruiter_id FROM jobs WHERE job_id=:job_id',
+                    {'job_id': job_id},
+                ) if job_id else None
+                job_title = (job_row.get('title') if job_row else None) or job_id or 'the role'
+                create_notification(
+                    member_id,
+                    'application.submitted',
+                    'Application submitted',
+                    f"Your application for {job_title} was successfully submitted.",
+                    actor_id=member_id,
+                    actor_name='',
+                    target_url='/applications',
+                    data={'job_id': job_id, 'application_id': entity_id},
+                )
+        elif topic == 'application.status.updated':
+            member_id = payload.get('member_id')
+            job_id = payload.get('job_id')
+            new_status = payload.get('status') or ''
+            if member_id and new_status:
+                job_row = fetch_one(
+                    'SELECT title FROM jobs WHERE job_id=:job_id',
+                    {'job_id': job_id},
+                ) if job_id else None
+                job_title = (job_row.get('title') if job_row else None) or job_id or 'your application'
+                create_notification(
+                    member_id,
+                    'application.status.updated',
+                    'Application status updated',
+                    f"Your application for {job_title} is now {new_status.replace('_', ' ')}.",
+                    actor_id=actor_id,
+                    actor_name='',
+                    target_url='/applications',
+                    data={'job_id': job_id, 'application_id': entity_id, 'status': new_status},
+                )
         elif topic == 'message.sent':
             receiver_id = payload.get('receiver_id')
             sender_id = payload.get('sender_id')

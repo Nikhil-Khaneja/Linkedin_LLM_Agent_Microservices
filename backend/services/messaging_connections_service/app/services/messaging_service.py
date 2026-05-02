@@ -154,7 +154,10 @@ class MessagingConnectionsService:
         existing_msg = self.repo.get_message_by_client_id(payload['thread_id'], payload.get('client_message_id', dedupe_key))
         if existing_msg:
             return success(existing_msg, trc, {'event_dispatch': 'published'})
-        row = self.repo.create_message({'thread_id': payload['thread_id'], 'sender_id': actor['sub'], 'receiver_id': receiver_id, 'text': payload.get('text', ''), 'client_message_id': payload.get('client_message_id', dedupe_key), 'delivery_state': 'sent'})
+        try:
+            row = self.repo.create_message({'thread_id': payload['thread_id'], 'sender_id': actor['sub'], 'receiver_id': receiver_id, 'text': payload.get('text', ''), 'client_message_id': payload.get('client_message_id', dedupe_key), 'delivery_state': 'sent'})
+        except Exception as exc:
+            return fail('message_send_failed', f'Failed to store message: {exc}', trc, retryable=True, status_code=503)
         thread['latest_message_at'] = row['sent_at']
         thread['latest_message_id'] = row['message_id']
         self.repo.save_thread(thread)

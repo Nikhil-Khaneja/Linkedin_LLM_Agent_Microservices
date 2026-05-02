@@ -66,7 +66,7 @@ def test_application_started_and_note_events_exist(clients):
     submitted = o5.post('/applications/submit', headers=MEMBER, json={
         'job_id': job_id, 'resume_ref': 'resume-501.pdf', 'idempotency_key': f'mem501-{job_id}-note'
     })
-    assert submitted.status_code == 200
+    assert submitted.status_code == 202
     app_id = submitted.json()['data']['application_id']
     noted = o5.post('/applications/addNote', headers=RECRUITER, json={'application_id': app_id, 'note_text': 'Strong candidate'})
     assert noted.status_code == 200

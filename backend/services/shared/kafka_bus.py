@@ -120,7 +120,7 @@ async def consume_forever(
                 for tp, messages in batch.items():
                     for msg in messages:
                         payload = msg.value if isinstance(msg.value, dict) else {}
-                        await handler(tp.topic, payload)
+                        await _handle_with_retry(tp.topic, payload, handler)
         except Exception as exc:
             log_event(_logger, 'kafka_consumer_retry', topic_list=topics, group_id=group_id, error=str(exc), backoff_seconds=backoff)
             await asyncio.sleep(backoff)
@@ -130,6 +130,32 @@ async def consume_forever(
                 await consumer.stop()
             except Exception:
                 pass
+
+
+_HANDLER_MAX_RETRIES = 3
+_HANDLER_RETRY_DELAY = 0.5
+
+
+async def _handle_with_retry(
+    topic: str,
+    payload: dict[str, Any],
+    handler: Callable[[str, dict[str, Any]], Awaitable[None]],
+) -> None:
+    last_exc: Exception | None = None
+    for attempt in range(_HANDLER_MAX_RETRIES):
+        try:
+            await handler(topic, payload)
+            return
+        except Exception as exc:
+            last_exc = exc
+            log_event(_logger, 'kafka_handler_retry', topic=topic, attempt=attempt + 1, error=str(exc))
+            if attempt < _HANDLER_MAX_RETRIES - 1:
+                await asyncio.sleep(_HANDLER_RETRY_DELAY * (attempt + 1))
+    log_event(_logger, 'kafka_handler_dlq', topic=topic, error=str(last_exc))
+    await publish_event(
+        f'dlq.{topic}',
+        {**payload, '_dlq_source_topic': topic, '_dlq_error': str(last_exc)},
+    )
 
 
 def reset_memory_bus() -> None:

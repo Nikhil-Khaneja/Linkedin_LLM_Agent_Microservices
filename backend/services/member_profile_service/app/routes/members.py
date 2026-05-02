@@ -7,35 +7,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Body, File, Form, Header, UploadFile
-from pymongo import MongoClient
 
 from services.shared.common import success, fail, trace_id, require_auth, build_event
 from services.shared.kafka_bus import publish_event
 from services.shared.cache import get_json, set_json
 from services.shared.relational import fetch_one, fetch_all, execute
 from services.member_profile_service.app.services.media_upload_service import get_media_upload_service
-from services.shared.notifications import create_notification
+from services.shared.notifications import create_notification, list_notifications as _list_notifications
+from services.shared.document_store import update_one as _ds_update
 from services.shared.resume_parser import extract_text_from_bytes
 
 router = APIRouter()
 
 UPLOAD_DIR = Path(os.environ.get("APP_DATA_DIR", "/app/data")) / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-_MONGO_CLIENT = None
-
-
-def _mongo():
-    global _MONGO_CLIENT
-    if _MONGO_CLIENT is None:
-        uri = os.environ.get("MONGO_URI") or os.environ.get("MONGO_URL") or "mongodb://mongo:27017"
-        _MONGO_CLIENT = MongoClient(uri)
-    db_name = os.environ.get("MONGO_DATABASE", "linkedin_sim")
-    return _MONGO_CLIENT[db_name]
-
-
-def _notifications():
-    return _mongo()["notifications"]
 
 
 def _actor(authorization: str | None):
@@ -491,9 +476,7 @@ async def list_notifications(payload: dict = Body(...), authorization: str | Non
         return fail("auth_required", "Bearer token is missing or invalid.", trc, status_code=401)
 
     member_id = actor["actor_id"]
-    docs = list(_notifications().find({"member_id": member_id}).sort("created_at", -1).limit(int(payload.get("page_size") or 30)))
-    for d in docs:
-        d["notification_id"] = d.pop("_id")
+    docs = _list_notifications(member_id, page_size=int(payload.get("page_size") or 30))
     return success({"items": docs}, trc)
 
 
@@ -508,7 +491,7 @@ async def mark_read(payload: dict = Body(...), authorization: str | None = Heade
     notification_id = payload.get("notification_id")
     if not notification_id:
         return fail("validation_error", "notification_id is required.", trc, status_code=400)
-    _notifications().update_one({"_id": notification_id, "member_id": actor["actor_id"]}, {"$set": {"is_read": True}})
+    _ds_update('notifications', {'_id': notification_id, 'member_id': actor["actor_id"]}, {'is_read': True})
     return success({"marked": True}, trc)
 
 

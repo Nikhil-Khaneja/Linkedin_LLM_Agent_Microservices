@@ -352,6 +352,10 @@ class JobRepository:
         return _from_json(row.get("payload_json"), {}) if row else None
 
     def get(self, job_id: str) -> dict[str, Any] | None:
+        from services.shared.cache import get_json as _get_json
+        pending = _get_json(f'job:pending:detail:{job_id}') or _get_json(f'job:detail:{job_id}')
+        if pending:
+            return pending
         row = fetch_one("SELECT payload_json FROM jobs WHERE job_id=:job_id", {"job_id": job_id})
         return _from_json(row.get("payload_json"), {}) if row else None
 

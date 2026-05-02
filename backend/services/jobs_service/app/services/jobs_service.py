@@ -65,9 +65,14 @@ class JobsService:
         state[job['job_id']] = {'job': job, 'operation': operation, 'updated_at': datetime.now(timezone.utc).isoformat()}
         set_json(self._pending_recruiter_key(recruiter_id), state, self.TTL_PENDING)
 
-    def _set_pending_saved_state(self, member_id: str, job_id: str, is_saved: bool) -> None:
+    def _set_pending_saved_state(self, member_id: str, job_id: str, is_saved: bool, job_snapshot: dict | None = None) -> None:
         state = get_json(self._pending_saved_key(member_id)) or {}
-        state[job_id] = {'is_saved': bool(is_saved), 'updated_at': datetime.now(timezone.utc).isoformat()}
+        entry = {'is_saved': bool(is_saved), 'updated_at': datetime.now(timezone.utc).isoformat()}
+        if job_snapshot:
+            entry['job_snapshot'] = job_snapshot
+        elif state.get(job_id, {}).get('job_snapshot'):
+            entry['job_snapshot'] = state[job_id]['job_snapshot']
+        state[job_id] = entry
         set_json(self._pending_saved_key(member_id), state, self.TTL_PENDING)
 
     def _apply_saved_overlay(self, items: list[dict], member_id: str | None) -> list[dict]:
@@ -320,7 +325,7 @@ class JobsService:
         job = self.repo.get(job_id) or get_json(self._pending_detail_key(job_id))
         if not job:
             return fail('job_not_found', 'Job not found.', trc, status_code=404)
-        self._set_pending_saved_state(actor['sub'], job_id, True)
+        self._set_pending_saved_state(actor['sub'], job_id, True, job_snapshot=job)
         self._invalidate_job_cache(job_id=job_id, member_id=actor['sub'])
         published = await publish_event('job.save.requested', build_event(event_type='job.save.requested', actor_id=actor['sub'], entity_type='job', entity_id=job_id, payload={'job_id': job_id, 'member_id': actor['sub']}, trace=trc, idempotency_key=f'job.save.requested:{job_id}:{actor["sub"]}'))
         if not published:
@@ -358,6 +363,16 @@ class JobsService:
             items = [item for item in items if item.get('is_saved')]
             return success({'items': items}, trc, {**cached['meta'], 'cache': 'hit'})
         items = self.repo.list_saved_jobs_for_member(member_id)
+        # merge pending saves that haven't been written to DB yet
+        pending_saves = get_json(self._pending_saved_key(member_id)) or {}
+        db_job_ids = {item.get('job_id') for item in items}
+        for job_id, marker in pending_saves.items():
+            if bool(marker.get('is_saved')) and job_id not in db_job_ids:
+                job_detail = (marker.get('job_snapshot')
+                              or get_json(self._pending_detail_key(job_id))
+                              or get_json(self._detail_key(job_id)))
+                if job_detail:
+                    items.append({**job_detail, 'is_saved': True})
         items = self._apply_saved_overlay(items, member_id)
         items = [item for item in items if item.get('is_saved')]
         body = {'items': items}
