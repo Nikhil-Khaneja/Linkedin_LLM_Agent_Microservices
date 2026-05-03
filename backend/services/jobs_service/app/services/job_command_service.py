@@ -9,6 +9,7 @@ from services.shared.common import build_event
 from services.shared.document_store import find_one, insert_one
 from services.shared.kafka_bus import consume_forever, publish_event
 from services.shared.observability import get_logger, log_event
+from services.shared.relational import fetch_one
 from services.shared.repositories import JobRepository
 
 _PROCESSED_COLLECTION = 'job_write_commands'
@@ -85,7 +86,7 @@ class JobCommandService:
         if topic == _TOPIC_CREATE:
             job = payload.get('job') or {}
             job_id = job.get('job_id')
-            if not self.repo.get(job_id):
+            if not fetch_one("SELECT job_id FROM jobs WHERE job_id=:job_id", {"job_id": job_id}):
                 self.repo.create(job)
             delete_key(_pending_detail_key(job_id))
             delete_pattern('jobs:search:*')
@@ -99,10 +100,11 @@ class JobCommandService:
             job = payload.get('job') or {}
             job_id = job.get('job_id')
             try:
-                current = self.repo.get(job_id) or {}
-                if not current:
+                db_row = fetch_one("SELECT payload_json FROM jobs WHERE job_id=:job_id", {"job_id": job_id})
+                if not db_row:
                     self.repo.create(job)
                 else:
+                    current = self.repo.get(job_id) or {}
                     expected = payload.get('expected_version') or current.get('version')
                     self.repo.update(job_id, {k: v for k, v in job.items() if k != 'job_id'}, expected)
             except ValueError:
@@ -119,6 +121,8 @@ class JobCommandService:
             job_id = payload.get('job_id')
             current = self.repo.get(job_id) or {}
             recruiter_id = payload.get('recruiter_id') or current.get('recruiter_id')
+            if not fetch_one("SELECT job_id FROM jobs WHERE job_id=:job_id", {"job_id": job_id}):
+                self.repo.create({**current, 'job_id': job_id})
             if current:
                 try:
                     self.repo.update(job_id, {'status': 'closed'}, current.get('version'))
