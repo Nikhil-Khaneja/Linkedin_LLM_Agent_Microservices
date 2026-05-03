@@ -1,6 +1,6 @@
 import asyncio
 from services.shared.cache import delete_pattern, get_json, set_json
-from services.shared.common import body_hash, fail, require_auth, success
+from services.shared.common import body_hash, build_event, fail, require_auth, success
 from services.shared.kafka_bus import consume_forever, publish_event
 from services.shared.repositories import JobRepository
 
@@ -62,7 +62,16 @@ class AnalyticsService:
         event = self.repo.insert_event(payload)
         self.rollups.apply_event(payload)
         self.invalidate_rollup_cache()
-        await publish_event('analytics.normalized', payload)
+        entity = payload.get('entity') or {}
+        await publish_event('analytics.normalized', build_event(
+            event_type='analytics.normalized',
+            actor_id=payload.get('actor_id') or 'analytics_service',
+            entity_type=entity.get('entity_type') or payload.get('event_type', 'event'),
+            entity_id=entity.get('entity_id') or event.get('event_id', ''),
+            payload=payload,
+            trace=trc,
+            idempotency_key=f'analytics.normalized:{dedupe_key}',
+        ))
         return success({'accepted': True, 'event_id': event['event_id']}, trc)
 
     def top_jobs(self, payload, authorization, trc):
@@ -153,7 +162,15 @@ class AnalyticsService:
         if actor['role'] not in {'recruiter', 'admin'}:
             return fail('forbidden', 'Recruiter/admin only.', trc, status_code=403)
         benchmark = self.repo.insert_benchmark(payload)
-        await publish_event('benchmark.completed', {'event_type': 'benchmark.completed', 'trace_id': trc, 'timestamp': payload.get('timestamp', '2026-04-25T00:00:00Z'), 'actor_id': actor['sub'], 'entity': {'entity_type': 'benchmark', 'entity_id': benchmark['benchmark_id']}, 'payload': benchmark, 'idempotency_key': payload.get('idempotency_key', benchmark['benchmark_id'])})
+        await publish_event('benchmark.completed', build_event(
+            event_type='benchmark.completed',
+            actor_id=actor['sub'],
+            entity_type='benchmark',
+            entity_id=benchmark['benchmark_id'],
+            payload=benchmark,
+            trace=trc,
+            idempotency_key=f'benchmark.completed:{benchmark["benchmark_id"]}',
+        ))
         self.invalidate_rollup_cache()
         return success({'benchmark_id': benchmark['benchmark_id'], 'accepted': True}, trc)
 

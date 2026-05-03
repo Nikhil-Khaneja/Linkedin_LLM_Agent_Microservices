@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from services.shared.auth import issue_access_token, password_hash, password_matches
 from services.shared.cache import delete_key, get_int, incr
-from services.shared.common import body_hash, check_idempotency, record_idempotency
+from services.shared.common import body_hash, build_event, check_idempotency, record_idempotency
 from services.shared.kafka_bus import publish_event
 from services.shared.repositories import MemberRepository, RecruiterRepository
 
@@ -116,7 +116,15 @@ class AuthService:
         bootstrap_state = 'pending_profile' if user['subject_type'] == 'member' else 'pending_recruiter'
         resp = {'user_id': user['user_id'], 'user_type': user['subject_type'], 'first_name': user.get('first_name'), 'last_name': user.get('last_name'), 'access_token': self.issue_access_token_for(user), 'refresh_token': refresh, 'expires_in': 3600, 'bootstrap_state': bootstrap_state}
         record_idempotency(route, idempotency_key or payload.get('idempotency_key'), request_hash, {'trace_id': trace_id, 'data': resp})
-        await publish_event('user.created', {'event_type': 'user.created', 'trace_id': trace_id, 'payload': {'user_id': user['user_id'], 'email': email, 'subject_type': user['subject_type']}})
+        await publish_event('user.created', build_event(
+            event_type='user.created',
+            actor_id=user['user_id'],
+            entity_type='user',
+            entity_id=user['user_id'],
+            payload={'user_id': user['user_id'], 'email': email, 'subject_type': user['subject_type']},
+            trace=trace_id,
+            idempotency_key=f'user.created:{user["user_id"]}',
+        ))
         return {'kind': 'success', 'data': resp, 'trace_id': trace_id}
 
     def login(self, email: str | None, password: str | None, trace_id: str):

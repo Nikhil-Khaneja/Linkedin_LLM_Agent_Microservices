@@ -6,7 +6,13 @@ from services.shared.common import body_hash, build_event, check_idempotency, fa
 from services.shared.outbox import RelationalOutboxRepository, dispatch_outbox_forever
 from services.shared.repositories import JobRepository
 from services.shared.notifications import create_notification
+from services.shared.kafka_bus import publish_event
+from services.shared.cache import get_json, set_json
 from services.shared.observability import get_logger, log_event
+
+
+def _pending_application_key(job_id: str, member_id: str) -> str:
+    return f'application:pending:{job_id}:{member_id}'
 
 
 class ApplicationsService:
@@ -83,42 +89,43 @@ class ApplicationsService:
             log_event(self.logger, 'application_submit_duplicate', trace_id=trc, action='submit', route=route, member_id=member_id, job_id=job_id, recruiter_id=job.get('recruiter_id'), error_code='duplicate_application')
             return fail('duplicate_application', 'Already applied to this job.', trc, status_code=409)
 
-        application_id = f"app_{uuid.uuid4().hex[:10]}"
-        applied_at = datetime.now(timezone.utc).replace(microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-        payload_with_member = {
-            **payload,
-            'application_id': application_id,
-            'member_id': member_id,
-            'status': 'submitted',
-            'application_datetime': applied_at,
-        }
+        # Also reject if a pending write for this job+member is already in-flight
+        if get_json(_pending_application_key(job_id, member_id)):
+            log_event(self.logger, 'application_submit_pending_conflict', trace_id=trc, action='submit', route=route, member_id=member_id, job_id=job_id, error_code='duplicate_application')
+            return fail('duplicate_application', 'Application is already being processed.', trc, status_code=409)
 
+        application_id = f"app_{uuid.uuid4().hex[:10]}"
+
+        # Kafka-first: publish the write request to Kafka; ApplicationCommandService writes to DB
         event = build_event(
-            event_type='application.submitted',
-            actor_id=actor['sub'],
+            event_type='application.submit.requested',
+            actor_id=member_id,
             entity_type='application',
             entity_id=application_id,
             payload={
+                'application_id': application_id,
                 'job_id': job_id,
                 'member_id': member_id,
                 'resume_ref': payload.get('resume_ref'),
-                'status': 'submitted',
-                'city': payload.get('city') or job.get('city') or 'San Jose',
+                'cover_letter': payload.get('cover_letter'),
+                'city': payload.get('city') or job.get('city') or '',
             },
             trace=trc,
-            idempotency_key=key,
+            idempotency_key=key or f'app.submit:{application_id}',
         )
-        try:
-            row = self.repo.create_with_outbox(payload_with_member, 'application.submitted', event)
-            log_event(self.logger, 'application_submit_persisted', trace_id=trc, action='submit', route=route, application_id=application_id, member_id=member_id, job_id=job_id, recruiter_id=job.get('recruiter_id'), outbox_topic='application.submitted', idempotency_key=event.get('idempotency_key'))
-        except Exception as exc:
-            log_event(self.logger, 'application_submit_failed', trace_id=trc, action='submit', route=route, application_id=application_id, member_id=member_id, job_id=job_id, recruiter_id=job.get('recruiter_id'), error_code='application_submit_failed', error_message=str(exc))
-            return fail('application_submit_failed', f'Failed to submit application: {str(exc)}', trc, status_code=500)
-        meta = {'event_dispatch': 'queued'}
-        response = {'trace_id': trc, 'data': {'application_id': row['application_id'], 'job_id': row.get('job_id'), 'member_id': row.get('member_id'), 'status': 'submitted', 'application_datetime': row.get('application_datetime') or applied_at}, 'meta': meta}
+        published = await publish_event('application.submit.requested', event)
+        if not published:
+            log_event(self.logger, 'application_submit_kafka_failed', trace_id=trc, action='submit', route=route, member_id=member_id, job_id=job_id, error_code='kafka_publish_failed')
+            return fail('kafka_publish_failed', 'Application submission could not be queued.', trc, status_code=503)
+
+        # Store pending state so duplicate checks catch in-flight requests
+        set_json(_pending_application_key(job_id, member_id), {'application_id': application_id, 'queued_at': datetime.now(timezone.utc).isoformat()}, 120)
+
+        response_data = {'application_id': application_id, 'job_id': job_id, 'member_id': member_id, 'status': 'accepted', 'dispatch': 'kafka'}
+        response = {'trace_id': trc, 'data': response_data, 'meta': {'write_state': 'pending', 'dispatch': 'kafka'}}
         record_idempotency(route, key, h, response)
-        log_event(self.logger, 'application_submit_succeeded', trace_id=trc, action='submit', route=route, application_id=row['application_id'], member_id=row.get('member_id'), job_id=row.get('job_id'), status='submitted', idempotency_key=key)
-        return success(response['data'], trc, response['meta'], status_code=202)
+        log_event(self.logger, 'application_submit_queued', trace_id=trc, action='submit', route=route, application_id=application_id, member_id=member_id, job_id=job_id, idempotency_key=key)
+        return success(response_data, trc, response['meta'], status_code=202)
 
     def start_application(self, payload, authorization, trc):
         try:

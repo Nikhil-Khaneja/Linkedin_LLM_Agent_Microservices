@@ -18,6 +18,7 @@ topics=(
   job.closed
   job.saved
   application.started
+  application.submit.requested
   application.submitted
   application.status.updated
   application.note.added
