@@ -71,7 +71,7 @@ def test_application_started_and_note_events_exist(clients):
     noted = o5.post('/applications/addNote', headers=RECRUITER, json={'application_id': app_id, 'note_text': 'Strong candidate'})
     assert noted.status_code == 200
 
-    time.sleep(0.2)
+    time.sleep(0.6)
     funnel = o7.post('/analytics/funnel', headers=RECRUITER, json={'job_id': job_id})
     assert funnel.status_code == 200
     data = funnel.json()['data']['funnel']
