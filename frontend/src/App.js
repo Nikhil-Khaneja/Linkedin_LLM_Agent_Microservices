@@ -17,6 +17,7 @@ import AIDashboard from './pages/AIDashboard';
 import AnalyticsPage from './pages/AnalyticsPage';
 import ConnectionsPage from './pages/ConnectionsPage';
 import NotificationsPage from './pages/NotificationsPage';
+import CareerCoachPage from './pages/CareerCoachPage';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }) {
@@ -44,6 +45,7 @@ function AppRoutes() {
         <Route path="analytics"       element={<AnalyticsPage />} />
         <Route path="connections"     element={<ConnectionsPage />} />
         <Route path="notifications"   element={<NotificationsPage />} />
+        <Route path="coach"           element={<CareerCoachPage />} />
       </Route>
     </Routes>
   );

@@ -1,0 +1,56 @@
+# docker-compose.override.baseline.yml
+#
+# Person 4 (Sanjay) — Benchmark Config B (Baseline)
+# Overrides CACHE_MODE and EVENT_BUS_MODE to remove Redis and Kafka
+# for the baseline performance measurement.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.override.baseline.yml up -d
+#
+# After baseline run, revert to normal stack:
+#   docker compose up -d
+#
+# WARNING: Never use this in production. Only for benchmarking config B.
+
+version: "3.9"
+
+services:
+  auth_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory
+
+  member_profile_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory
+
+  recruiter_company_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory
+
+  jobs_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory
+
+  applications_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory
+
+  messaging_connections_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory
+
+  analytics_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory
+
+  ai_orchestrator_service:
+    environment:
+      CACHE_MODE: memory
+      EVENT_BUS_MODE: memory

@@ -30,7 +30,12 @@ export default function RecruiterDashboard() {
   const [chartSaves, setChartSaves] = useState([]);
   const [geoJobId, setGeoJobId] = useState('');
   const [chartGeo, setChartGeo] = useState([]);
+  const [funnelJobId, setFunnelJobId] = useState('');
+  const [chartFunnel, setChartFunnel] = useState([]);
   const [chartsLoading, setChartsLoading] = useState(false);
+  const [editingJob, setEditingJob] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
 
   const recruiterId = user?.principalId || user?.userId;
   const token = localStorage.getItem('access_token');
@@ -149,11 +154,30 @@ export default function RecruiterDashboard() {
   useEffect(() => {
     if (!jobs.length) return;
     setGeoJobId((prev) => prev || jobs[0].job_id);
+    setFunnelJobId((prev) => prev || jobs[0].job_id);
   }, [jobs]);
 
   useEffect(() => {
     if (geoJobId && token) loadGeoChart(geoJobId);
   }, [geoJobId, token]);
+
+  const loadFunnelChart = async (jid) => {
+    if (!jid || !token) { setChartFunnel([]); return; }
+    try {
+      const { data } = await axios.post(`${BASE.analytics}/analytics/funnel`, { job_id: jid }, authCfg);
+      const f = data.data?.funnel || {};
+      setChartFunnel([
+        { stage: 'Viewed',    count: f.viewed || 0 },
+        { stage: 'Saved',     count: f.saved || 0 },
+        { stage: 'Started',   count: f.apply_started || 0 },
+        { stage: 'Submitted', count: f.submitted || 0 },
+      ]);
+    } catch { setChartFunnel([]); }
+  };
+
+  useEffect(() => {
+    if (funnelJobId && token) loadFunnelChart(funnelJobId);
+  }, [funnelJobId, token]);
 
   const postJob = async () => {
     if (!recruiterInfo?.company_name) {
@@ -212,6 +236,49 @@ export default function RecruiterDashboard() {
       loadJobs(recruiterId);
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Failed to close job');
+    }
+  };
+
+  const openEditJob = (job) => {
+    setEditingJob(job.job_id);
+    setEditForm({
+      title: job.title || '',
+      description: job.description_text || job.description || '',
+      employment_type: job.employment_type || 'full_time',
+      work_mode: job.work_mode || 'onsite',
+      city: job.city || '',
+      state: job.state || '',
+      seniority_level: job.seniority_level || 'mid',
+      salary_min: job.salary_min || '',
+      salary_max: job.salary_max || '',
+      skills_required: (job.skills_required || []).join(', '),
+    });
+  };
+
+  const saveEditJob = async (jobId) => {
+    setSaving(true);
+    try {
+      const payload = {
+        job_id: jobId,
+        title: editForm.title,
+        description_text: editForm.description,
+        employment_type: editForm.employment_type,
+        work_mode: editForm.work_mode,
+        city: editForm.city,
+        state: editForm.state,
+        seniority_level: editForm.seniority_level,
+        salary_min: editForm.salary_min ? Number(editForm.salary_min) : null,
+        salary_max: editForm.salary_max ? Number(editForm.salary_max) : null,
+        skills_required: editForm.skills_required.split(',').map(s => s.trim()).filter(Boolean),
+      };
+      await axios.post(`${BASE.job}/jobs/update`, payload, authCfg);
+      toast.success('Job updated');
+      setEditingJob(null);
+      loadJobs(recruiterId);
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to update job');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -358,6 +425,32 @@ export default function RecruiterDashboard() {
                 )}
               </ChartCard>
             </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <ChartCard title="Application funnel (select a job)">
+                {jobs.length === 0 ? (
+                  <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }}>Post at least one job to see the application funnel.</p>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: 12 }}>
+                      <select value={funnelJobId} onChange={(e) => setFunnelJobId(e.target.value)} style={{ ...S.inp, maxWidth: '100%' }}>
+                        {jobs.map((j) => (
+                          <option key={j.job_id} value={j.job_id}>{(j.title || j.job_id || '').slice(0, 60)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={chartFunnel} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="stage" tick={{ fontSize: 13 }} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#057642" radius={[4, 4, 0, 0]} label={{ position: 'top', fontSize: 12 }} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </>
+                )}
+              </ChartCard>
+            </div>
           </div>
         )}
       </div>
@@ -411,9 +504,36 @@ export default function RecruiterDashboard() {
               </div>
               <div style={{ display:'flex', gap:8, flexShrink:0 }}>
                 <button onClick={() => viewApplicants(job)} style={S.viewBtn}>{expandedJob?.job_id===job.job_id ? 'Hide applicants' : `View applicants (${job.applicants_count || 0})`}</button>
+                {job.status==='open' && <button onClick={() => openEditJob(job)} style={S.smallBtn}>Edit</button>}
                 {job.status==='open' && <button onClick={() => closeJob(job.job_id)} style={S.closeJobBtn}>Close</button>}
               </div>
             </div>
+            {editingJob === job.job_id && (
+              <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', padding:'16px 20px', background:'#f9fafb' }}>
+                <h4 style={{ fontSize:15, fontWeight:700, marginBottom:14 }}>Edit Job</h4>
+                <div style={S.formGrid}>
+                  <FField label="Job Title" value={editForm.title} onChange={e => setEditForm(p=>({...p,title:e.target.value}))} />
+                  <FSel label="Seniority Level" value={editForm.seniority_level} onChange={e => setEditForm(p=>({...p,seniority_level:e.target.value}))} options={['intern','junior','mid','senior','lead','manager','director','vp','c_level']} />
+                  <FSel label="Employment Type" value={editForm.employment_type} onChange={e => setEditForm(p=>({...p,employment_type:e.target.value}))} options={['full_time','part_time','contract','internship','temporary']} />
+                  <FSel label="Work Mode" value={editForm.work_mode} onChange={e => setEditForm(p=>({...p,work_mode:e.target.value}))} options={['onsite','remote','hybrid']} />
+                  <FField label="City" value={editForm.city} onChange={e => setEditForm(p=>({...p,city:e.target.value}))} />
+                  <FField label="State" value={editForm.state} onChange={e => setEditForm(p=>({...p,state:e.target.value}))} />
+                  <FField label="Min Salary ($)" type="number" value={editForm.salary_min} onChange={e => setEditForm(p=>({...p,salary_min:e.target.value}))} placeholder="e.g. 80000" />
+                  <FField label="Max Salary ($)" type="number" value={editForm.salary_max} onChange={e => setEditForm(p=>({...p,salary_max:e.target.value}))} placeholder="e.g. 120000" />
+                  <div style={{ gridColumn:'1/-1' }}>
+                    <FField label="Skills (comma-separated)" value={editForm.skills_required} onChange={e => setEditForm(p=>({...p,skills_required:e.target.value}))} placeholder="Python, React, SQL…" />
+                  </div>
+                  <div style={{ gridColumn:'1/-1' }}>
+                    <label style={S.lbl}>Description</label>
+                    <textarea style={{...S.inp, height:80, resize:'vertical'}} value={editForm.description} onChange={e => setEditForm(p=>({...p,description:e.target.value}))} />
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                  <button onClick={() => saveEditJob(job.job_id)} disabled={saving} style={S.submitBtn}>{saving ? 'Saving…' : 'Save changes'}</button>
+                  <button onClick={() => setEditingJob(null)} style={S.cancelBtn}>Cancel</button>
+                </div>
+              </div>
+            )}
             {expandedJob?.job_id === job.job_id && (
               <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', padding:'16px 20px', background:'#fafafa' }}>
                 <h4 style={{ fontSize:16, fontWeight:700, marginBottom:14 }}>Applicants — {applicants.length} total</h4>

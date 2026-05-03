@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import BASE from '../config/api';
 
 const STEPS = {
@@ -48,6 +49,9 @@ export default function AIDashboard() {
   const [activeTask, setActiveTask] = useState(null);
   const [log, setLog] = useState([]);
   const [sendingOutreach, setSendingOutreach] = useState(false);
+  const [approvalStats, setApprovalStats] = useState(null);
+  const [matchQuality, setMatchQuality] = useState(null);
+  const [draftEdits, setDraftEdits] = useState({});
   const wsRef = useRef(null);
   const navigate = useNavigate();
   const activeTaskRef = useRef(null);
@@ -62,8 +66,8 @@ export default function AIDashboard() {
         const recruiterRes = await axios.post(`${BASE.recruiter}/recruiters/get`, {}, authCfg);
         const rid = recruiterRes.data?.data?.recruiter?.recruiter_id;
         const jobsRes = rid
-          ? await axios.post(`${BASE.job}/jobs/byRecruiter`, { recruiter_id: rid, page: 1, page_size: 15 }, authCfg)
-          : await axios.post(`${BASE.job}/jobs/search`, { page: 1, page_size: 15 }, authCfg);
+          ? await axios.post(`${BASE.job}/jobs/byRecruiter`, { recruiter_id: rid }, authCfg)
+          : await axios.post(`${BASE.job}/jobs/search`, { page_size: 50 }, authCfg);
         if (mounted) {
           const items = jobsRes.data?.data?.items || [];
           setJobs(items);
@@ -71,7 +75,7 @@ export default function AIDashboard() {
         }
       } catch {
         try {
-          const jobsRes = await axios.post(`${BASE.job}/jobs/search`, { page: 1, page_size: 15 }, authCfg);
+          const jobsRes = await axios.post(`${BASE.job}/jobs/search`, { page_size: 50 }, authCfg);
           if (mounted) {
             const items = jobsRes.data?.data?.items || [];
             setJobs(items);
@@ -95,6 +99,30 @@ export default function AIDashboard() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) return;
+    let mounted = true;
+    const loadMetrics = async () => {
+      try {
+        const [rateRes, qualityRes] = await Promise.all([
+          axios.get(`${BASE.ai}/ai/analytics/approval-rate`, authCfg),
+          axios.get(`${BASE.ai}/ai/analytics/match-quality`, authCfg),
+        ]);
+        if (!mounted) return;
+        setApprovalStats(rateRes.data?.data || null);
+        setMatchQuality(qualityRes.data?.data || null);
+      } catch (_) {
+        if (mounted) {
+          setApprovalStats(null);
+          setMatchQuality(null);
+        }
+      }
+    };
+    loadMetrics();
+    // refetch whenever a task transitions to a terminal state
+    return () => { mounted = false; };
+  }, [token, tasks.length, activeTask?.status]);
+
+  useEffect(() => {
     if (!activeTask?.task_id || !['queued', 'running', 'waiting_approval', 'awaiting_approval'].includes(activeTask.status)) return undefined;
     const timer = setInterval(() => pollTask(activeTask.task_id, false), 3000);
     return () => clearInterval(timer);
@@ -111,6 +139,15 @@ export default function AIDashboard() {
     }
     return undefined;
   }, [activeTask?.task_id, activeTask?.status]);
+
+  useEffect(() => {
+    const drafts = activeTask?.output?.outreach_drafts || [];
+    const initial = {};
+    drafts.forEach((d) => {
+      if (d && d.candidate_id) initial[d.candidate_id] = d.message || d.draft || '';
+    });
+    setDraftEdits(initial);
+  }, [activeTask?.task_id]);
 
   const parsedCandidates = normalizeArray(activeTask?.output?.parsed_candidates);
   const shortlist = normalizeArray(activeTask?.output?.shortlist).map((candidate) => ({
@@ -218,8 +255,12 @@ export default function AIDashboard() {
   const approve = async (taskId, sendOutreach = true) => {
     try {
       setSendingOutreach(sendOutreach);
-      const { data } = await axios.post(`${BASE.ai}/ai/tasks/${taskId}/approve`, { approved: true, send_outreach: sendOutreach }, authCfg);
-      toast.success(sendOutreach ? `Approved and sent ${data?.data?.sent_count || 0} outreach messages` : 'Approved');
+      const body = { approved: true, send_outreach: sendOutreach };
+      if (draftEdits && Object.keys(draftEdits).length > 0) body.edits = draftEdits;
+      const { data } = await axios.post(`${BASE.ai}/ai/tasks/${taskId}/approve`, body, authCfg);
+      const action = data?.data?.approval_action;
+      const actionMsg = action === 'edited' ? ' (with edits)' : action === 'approved_as_is' ? ' (as-is)' : '';
+      toast.success(sendOutreach ? `Approved${actionMsg} and sent ${data?.data?.sent_count || 0} outreach messages` : `Approved${actionMsg}`);
       pollTask(taskId, true);
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Approve failed');
@@ -307,6 +348,68 @@ export default function AIDashboard() {
         </div>
       </div>
 
+      <div className="li-card" style={{ padding: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>AI evaluation metrics</h2>
+        <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.55)', marginBottom: 16 }}>
+          Aggregate across your AI tasks — approval action breakdown + matching quality (top 5 per task).
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(220px, 1fr)', gap: 20, alignItems: 'center' }}>
+          <div style={{ height: 220 }}>
+            {approvalStats && approvalStats.total_tasks > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Approved as-is', value: approvalStats.approved_as_is },
+                      { name: 'Edited', value: approvalStats.edited },
+                      { name: 'Rejected', value: approvalStats.rejected },
+                    ].filter((slice) => slice.value > 0)}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={70}
+                    label={({ name, value }) => `${name}: ${value}`}
+                  >
+                    <Cell fill="#057642" />
+                    <Cell fill="#e68a00" />
+                    <Cell fill="#cc1016" />
+                  </Pie>
+                  <Tooltip />
+                  <Legend verticalAlign="bottom" height={24} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'rgba(0,0,0,0.4)', fontSize: 14 }}>
+                No approved/rejected tasks yet.
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Approval rate</p>
+              <p style={{ fontSize: 28, fontWeight: 700, color: '#057642' }}>
+                {approvalStats ? `${approvalStats.approval_rate_pct}%` : '—'}
+              </p>
+              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)' }}>
+                {approvalStats ? `${approvalStats.approved_as_is} of ${approvalStats.total_tasks} accepted without edits` : 'Awaiting data'}
+              </p>
+            </div>
+            <div>
+              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Avg match score (top {matchQuality?.top_k || 5})</p>
+              <p style={{ fontSize: 28, fontWeight: 700, color: '#0a66c2' }}>
+                {matchQuality && matchQuality.sample_size > 0 ? matchQuality.avg_match_score : '—'}
+              </p>
+              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)' }}>
+                {matchQuality && matchQuality.sample_size > 0
+                  ? `${matchQuality.avg_skill_overlap_pct}% avg skill overlap · n=${matchQuality.sample_size}`
+                  : 'No shortlisted candidates yet'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1fr)', gap: 16 }}>
         <div className="li-card" style={{ padding: 20 }}>
           <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 14 }}>Task history</h3>
@@ -381,6 +484,34 @@ export default function AIDashboard() {
               )}
             </div>
           </div>
+
+          {['waiting_approval', 'awaiting_approval'].includes(activeTask.status) && outreachDrafts.length > 0 && (
+            <section>
+              <h3 style={S.sectionTitle}>Outreach drafts (editable — one per candidate)</h3>
+              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', marginBottom: 10 }}>
+                Edit any draft below before approving. If you change <strong>any</strong> of them, this approval is recorded as <strong>edited</strong>; if you leave them all as-is, it's recorded as <strong>approved_as_is</strong>.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {outreachDrafts.map((draft) => {
+                  const cid = draft.candidate_id;
+                  if (!cid) return null;
+                  return (
+                    <div key={cid} style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 6, padding: 10 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+                        {draft.name || cid}
+                      </p>
+                      <textarea
+                        value={draftEdits[cid] ?? (draft.message || draft.draft || '')}
+                        onChange={(e) => setDraftEdits({ ...draftEdits, [cid]: e.target.value })}
+                        rows={5}
+                        style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid rgba(0,0,0,0.15)', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.5 }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           {parsedCandidates.length > 0 && (
             <section>

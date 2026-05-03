@@ -23,6 +23,7 @@ export default function AnalyticsPage() {
   const [funnelData, setFunnelData] = useState(null);
   const [funnelJob, setFunnelJob] = useState('');
   const [geoJob, setGeoJob] = useState('');
+  const [recruiterJobs, setRecruiterJobs] = useState([]);
   const [memberId, setMemberId] = useState('');
   const [benchmarks, setBenchmarks] = useState([]);
   const [tab, setTab] = useState('member');
@@ -70,6 +71,15 @@ export default function AnalyticsPage() {
   }, [user?.userType, user?.principalId, user?.userId]);
 
   const loadRecruiterDashboard = async () => {
+    try {
+      const jobsResp = await axios.post(`${BASE.job}/jobs/byRecruiter`, { page: 1, page_size: 50 }, authCfg);
+      const jobs = jobsResp.data?.data?.items || [];
+      setRecruiterJobs(jobs);
+      if (jobs.length) {
+        setGeoJob(j => j || jobs[0].job_id);
+        setFunnelJob(j => j || jobs[0].job_id);
+      }
+    } catch { setRecruiterJobs([]); }
     try {
       const [topData, lowData, viewData, savedDataResp] = await Promise.all([
         axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric:'applications', window_days:30, limit:10 }, authCfg),
@@ -122,8 +132,11 @@ export default function AnalyticsPage() {
     }
   };
 
+  useEffect(() => { if (geoJob) loadGeo(); }, [geoJob]);
+  useEffect(() => { if (funnelJob) loadFunnel(); }, [funnelJob]);
+
   const loadFunnel = async () => {
-    if (!funnelJob.trim()) return toast.error('Enter a job ID');
+    if (!funnelJob.trim()) return;
     try {
       const { data } = await axios.post(`${BASE.analytics}/analytics/funnel`, { job_id: funnelJob, window_days:30 }, authCfg);
       const f = data.data?.funnel;
@@ -134,7 +147,7 @@ export default function AnalyticsPage() {
   };
 
   const loadGeo = async () => {
-    if (!geoJob.trim()) return toast.error('Enter a job ID');
+    if (!geoJob.trim()) return;
     try {
       const { data } = await axios.post(`${BASE.analytics}/analytics/geo`, { job_id: geoJob, window_days:30 }, authCfg);
       const geo = data.data?.geo_distribution || data.data?.items || [];
@@ -227,9 +240,11 @@ export default function AnalyticsPage() {
           <div style={{ ...S.card, gridColumn:'1/-1' }}>
             <h2 style={S.ct}>City-wise Applications per Job</h2>
             <p style={S.cs}>Geographic distribution from application.submitted payloads.</p>
-            <div style={{ display:'flex', gap:10, marginBottom:16 }}>
-              <input value={geoJob} onChange={e => setGeoJob(e.target.value)} placeholder="Paste a job_id here…" style={S.searchInput} />
-              <button onClick={loadGeo} style={S.searchBtn}>Load map</button>
+            <div style={{ marginBottom:16 }}>
+              <select value={geoJob} onChange={e => setGeoJob(e.target.value)} style={{ ...S.searchInput, maxWidth:480, cursor:'pointer' }}>
+                {recruiterJobs.length === 0 && <option value="">No jobs found</option>}
+                {recruiterJobs.map(j => <option key={j.job_id} value={j.job_id}>{(j.title || j.job_id).slice(0,60)} — {j.job_id}</option>)}
+              </select>
             </div>
             {geoData.length > 0 ? (
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
@@ -257,9 +272,11 @@ export default function AnalyticsPage() {
           <div style={{ ...S.card, gridColumn:'1/-1' }}>
             <h2 style={S.ct}>Application Funnel</h2>
             <p style={S.cs}>View → Save → Apply start → Submit, all from real Kafka events.</p>
-            <div style={{ display:'flex', gap:10, marginBottom:16 }}>
-              <input value={funnelJob} onChange={e => setFunnelJob(e.target.value)} placeholder="Paste a job_id here…" style={S.searchInput} />
-              <button onClick={loadFunnel} style={S.searchBtn}>Load funnel</button>
+            <div style={{ marginBottom:16 }}>
+              <select value={funnelJob} onChange={e => setFunnelJob(e.target.value)} style={{ ...S.searchInput, maxWidth:480, cursor:'pointer' }}>
+                {recruiterJobs.length === 0 && <option value="">No jobs found</option>}
+                {recruiterJobs.map(j => <option key={j.job_id} value={j.job_id}>{(j.title || j.job_id).slice(0,60)} — {j.job_id}</option>)}
+              </select>
             </div>
             {funnelData ? (
               <ResponsiveContainer width="100%" height={200}>
