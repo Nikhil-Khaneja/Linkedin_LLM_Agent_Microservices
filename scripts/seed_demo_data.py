@@ -37,7 +37,7 @@ def main():
         'email': 'ava@example.com', 'password': 'StrongPass#1', 'user_type': 'member', 'first_name': 'Ava', 'last_name': 'Shah'
     }, allow_conflict=True)
     post('auth', '/auth/register', {
-        'email': 'recruiter@example.com', 'password': 'RecruiterPass#1', 'user_type': 'recruiter', 'first_name': 'Morgan', 'last_name': 'Lee'
+        'email': 'recruiter@example.com', 'password': 'RecruiterPass#1', 'user_type': 'recruiter', 'first_name': 'Morgan', 'last_name': 'Lee', 'company_name': 'Northstar Labs'
     }, allow_conflict=True)
 
     print('Logging in...')
