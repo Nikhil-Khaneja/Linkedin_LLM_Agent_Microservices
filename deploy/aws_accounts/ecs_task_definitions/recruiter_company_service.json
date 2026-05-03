@@ -1,0 +1,129 @@
+{
+  "family": "recruiter_company_service",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "recruiter_company_service",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/linkedin-sim-backend:latest",
+      "essential": true,
+      "command": [
+        "uvicorn",
+        "services.recruiter_company_service.app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8003"
+      ],
+      "portMappings": [
+        {
+          "containerPort": 8003,
+          "hostPort": 8003,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "EVENT_BUS_MODE",
+          "value": "kafka"
+        },
+        {
+          "name": "KAFKA_BOOTSTRAP_SERVERS",
+          "value": "${KAFKA_BOOTSTRAP_SERVERS}"
+        },
+        {
+          "name": "CACHE_MODE",
+          "value": "redis"
+        },
+        {
+          "name": "REDIS_URL",
+          "value": "${REDIS_URL}"
+        },
+        {
+          "name": "MYSQL_HOST",
+          "value": "${MYSQL_HOST}"
+        },
+        {
+          "name": "MYSQL_PORT",
+          "value": "3306"
+        },
+        {
+          "name": "MYSQL_DATABASE",
+          "value": "linkedin_sim"
+        },
+        {
+          "name": "MYSQL_USER",
+          "value": "${MYSQL_USER}"
+        },
+        {
+          "name": "MYSQL_PASSWORD",
+          "value": "${MYSQL_PASSWORD}"
+        },
+        {
+          "name": "MONGO_URL",
+          "value": "${MONGO_URL}"
+        },
+        {
+          "name": "MONGO_DATABASE",
+          "value": "linkedin_sim_docs"
+        },
+        {
+          "name": "JWT_ISSUER",
+          "value": "owner1-auth"
+        },
+        {
+          "name": "JWT_AUDIENCE",
+          "value": "linkedin-clone"
+        },
+        {
+          "name": "OWNER1_JWKS_URL",
+          "value": "${OWNER1_JWKS_URL}"
+        },
+        {
+          "name": "MINIO_ENDPOINT",
+          "value": "${MINIO_ENDPOINT}"
+        },
+        {
+          "name": "MINIO_ROOT_USER",
+          "value": "${MINIO_ROOT_USER}"
+        },
+        {
+          "name": "MINIO_ROOT_PASSWORD",
+          "value": "${MINIO_ROOT_PASSWORD}"
+        },
+        {
+          "name": "MINIO_BUCKET_PROFILE",
+          "value": "profile-media"
+        },
+        {
+          "name": "SERVICE_NAME",
+          "value": "recruiter_company_service"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/recruiter_company_service",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -f http://localhost:8003/ops/healthz || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
