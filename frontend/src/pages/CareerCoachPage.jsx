@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { useSearchParams } from 'react-router-dom';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -15,10 +16,13 @@ const S = {
 
 export default function CareerCoachPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const prefilledJobId = searchParams.get('job') || '';
   const [jobs, setJobs] = useState([]);
-  const [selJob, setSelJob] = useState('');
+  const [selJob, setSelJob] = useState(prefilledJobId);
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState(null);
+  const autoRanRef = useRef(false);
 
   const token = localStorage.getItem('access_token');
   const authCfg = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
@@ -32,7 +36,8 @@ export default function CareerCoachPage() {
         if (mounted) {
           const items = res.data?.data?.items || [];
           setJobs(items);
-          if (!selJob && items[0]) setSelJob(items[0].job_id);
+          // Respect prefilled job from URL if it's in the list, else fall back to first.
+          if (!selJob && !prefilledJobId && items[0]) setSelJob(items[0].job_id);
         }
       } catch {
         if (mounted) setJobs([]);
@@ -42,14 +47,15 @@ export default function CareerCoachPage() {
     return () => { mounted = false; };
   }, [token]);
 
-  const runCoach = async () => {
-    if (!selJob) return toast.error('Select a job first');
+  const runCoach = useCallback(async (jobId) => {
+    const target = jobId || selJob;
+    if (!target) return toast.error('Select a job first');
     setLoading(true);
     setSuggestion(null);
     try {
       const { data } = await axios.post(
         `${BASE.ai}/ai/coach/suggest`,
-        { target_job_id: selJob },
+        { target_job_id: target },
         authCfg,
       );
       setSuggestion(data?.data || null);
@@ -59,7 +65,15 @@ export default function CareerCoachPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selJob, authCfg]);
+
+  // Auto-run once when we arrive with ?job=<id> and the token is present.
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    if (!token || !prefilledJobId) return;
+    autoRanRef.current = true;
+    runCoach(prefilledJobId);
+  }, [token, prefilledJobId, runCoach]);
 
   const selectedJob = jobs.find((job) => job.job_id === selJob);
 
@@ -87,7 +101,7 @@ export default function CareerCoachPage() {
             </select>
           </div>
           <button
-            onClick={runCoach}
+            onClick={() => runCoach()}
             disabled={loading || !selJob}
             className="li-btn-primary"
             style={{ borderRadius: 4, padding: '11px 28px', fontSize: 16, opacity: loading || !selJob ? 0.6 : 1 }}

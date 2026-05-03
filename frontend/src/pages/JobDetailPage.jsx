@@ -217,6 +217,9 @@ export default function JobDetailPage() {
                 {job.status === 'open' && (
                   <button onClick={() => { if (!hasApplied) { markApplyStarted(); setShowModal(true); } }} style={{...S.applyBtn, background: hasApplied ? '#057642' : '#0a66c2', cursor: hasApplied ? 'default' : 'pointer'}}>{hasApplied ? '✓ Applied' : 'Apply'}</button>
                 )}
+                {job.status === 'open' && (
+                  <button onClick={() => navigate(`/coach?job=${jobId}`)} style={{ ...S.applyBtn, background: '#fff', color: '#0a66c2', border: '1.5px solid #0a66c2', marginLeft: 8 }} title="Get AI tips to improve your match for this job">Optimize</button>
+                )}
                 <button onClick={toggleSave} disabled={saving} style={{...S.cancelBtn, borderRadius:24, color:isSaved ? '#0a66c2' : 'rgba(0,0,0,0.7)', borderColor:isSaved ? '#0a66c2' : 'rgba(0,0,0,0.35)'}}>{saving ? 'Saving…' : (isSaved ? 'Saved' : 'Save')}</button>
               </>
             )}
@@ -237,6 +240,7 @@ export default function JobDetailPage() {
           <Detail icon="📊" label="Seniority level" value={job.seniority_level} />
           <Detail icon="📅" label="Posted" value={new Date(job.posted_at || job.created_at || Date.now()).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})} />
           {user?.userType === 'member' && job.status === 'open' && !hasApplied && <button onClick={() => { markApplyStarted(); setShowModal(true); }} style={{ ...S.applyBtn, width:'100%', marginTop:16, borderRadius:4 }}>Apply now</button>}
+          {user?.userType === 'member' && job.status === 'open' && <button onClick={() => navigate(`/coach?job=${jobId}`)} style={{ ...S.applyBtn, background: '#fff', color: '#0a66c2', border: '1.5px solid #0a66c2', width:'100%', marginTop:8, borderRadius:4 }}>Optimize my profile for this job</button>}
         </div>
       </aside>
 
