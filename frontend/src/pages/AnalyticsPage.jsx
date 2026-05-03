@@ -24,7 +24,7 @@ export default function AnalyticsPage() {
   const [geoJob, setGeoJob] = useState('');
   const [memberId, setMemberId] = useState('');
   const [benchmarks, setBenchmarks] = useState([]);
-  const [tab, setTab] = useState('recruiter');
+  const [tab, setTab] = useState(user?.userType === 'member' ? 'member' : 'recruiter');
 
   const authCfg = useMemo(() => ({ headers: { Authorization: 'Bearer ' + localStorage.getItem('access_token') } }), []);
 

@@ -130,6 +130,7 @@ export default function Layout() {
     { to:'/applications',label:'My Jobs',   icon:<BriefIcon /> },
     { to:'/connections', label:'Network',   icon:<NetIcon /> },
     { to:'/messages',    label:'Messaging', icon:<MsgIcon /> },
+    { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
   ];
   const recruiterNav = [
     { to:'/ai',        label:'Home',      icon:<HomeIcon /> },

@@ -125,6 +125,9 @@ export default function ProfilePage() {
         setProfileType('member');
         setProfile(p);
         if (p) hydrateMemberForm(p);
+        if (p?.profile_photo_url && viewedId === currentId) {
+          localStorage.setItem(`photo_${currentId}`, p.profile_photo_url);
+        }
         return;
       } catch (err) {
         const code = err?.response?.data?.error?.code;

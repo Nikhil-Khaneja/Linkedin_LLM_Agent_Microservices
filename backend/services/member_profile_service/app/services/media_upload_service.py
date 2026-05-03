@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from services.shared.cache import delete_key
 from services.shared.common import build_event, trace_id
 from services.shared.document_store import find_one, replace_one, update_one
 from services.shared.kafka_bus import consume_forever, publish_event
@@ -163,6 +164,7 @@ class MediaUploadService:
                     'resume_text': resume_text_db,
                 },
             )
+            delete_key(f'member:pending:update:{member_id}')
             log_event(self.logger, 'member_media_upload_member_updated', upload_id=upload.get('upload_id'), member_id=member_id, media_type=upload.get('media_type'), profile_photo_url_length=len(profile_photo_url), resume_url_length=len(resume_url), resume_text_length=len(resume_text_db or ''))
         except Exception as exc:
             log_event(self.logger, 'member_media_upload_member_update_failed', upload_id=upload.get('upload_id'), member_id=member_id, media_type=upload.get('media_type'), profile_photo_url_length=len(profile_photo_url), resume_url_length=len(resume_url), error=str(exc))
