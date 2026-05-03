@@ -10,6 +10,7 @@ from fastapi import WebSocket
 
 from services.ai_orchestrator_service.app.services.ai_matching import CandidateMatchingService
 from services.ai_orchestrator_service.app.services.ai_openrouter_client import OpenRouterClient
+from services.ai_orchestrator_service.app.services.ai_resume_intelligence import collect_resume_text, parse_resume
 from services.shared.cache import get_json, set_json
 from services.shared.common import body_hash, build_event, check_idempotency, fail, record_idempotency, require_auth, success, trace_id
 from services.shared.kafka_bus import consume_forever, publish_event
@@ -379,12 +380,15 @@ class AIOrchestratorService:
         elif step == 'approved':
             task['status'] = 'completed'
             task['approval_state'] = 'approved'
+            if payload.get('approval_action') in {'approved_as_is', 'edited'}:
+                task['approval_action'] = payload['approval_action']
             output['sent_messages'] = payload.get('sent_messages', output.get('sent_messages', []))
             output['outreach_sent_count'] = payload.get('sent_count', output.get('outreach_sent_count', 0))
             output['outreach_send_failures'] = payload.get('failed', output.get('outreach_send_failures', []))
         elif step == 'rejected':
             task['status'] = 'rejected'
             task['approval_state'] = 'rejected'
+            task['approval_action'] = 'rejected'
         elif step == 'failed':
             task['status'] = 'failed'
             output['error'] = payload.get('error')
@@ -531,6 +535,155 @@ class AIOrchestratorService:
             self.cache_task(task['task_id'], task)
         return success({'items': tasks}, trc, {'total': len(tasks)})
 
+    def _scoped_tasks(self, actor: dict) -> list[dict]:
+        if actor.get('role') == 'admin':
+            raw = self.repo.list_all_tasks()
+        else:
+            raw = self.repo.list_tasks_for_user(actor['sub'])
+        return [self._normalize_task(task) for task in raw if task]
+
+    def approval_rate(self, authorization, trc):
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        if actor['role'] not in {'recruiter', 'admin'}:
+            return fail('forbidden', 'Recruiter/admin only.', trc, status_code=403)
+        counts = {'approved_as_is': 0, 'edited': 0, 'rejected': 0}
+        for task in self._scoped_tasks(actor):
+            action = task.get('approval_action')
+            if action in counts:
+                counts[action] += 1
+        total = counts['approved_as_is'] + counts['edited'] + counts['rejected']
+        def pct(n: int) -> float:
+            return round((n / total) * 100, 1) if total else 0.0
+        payload = {
+            'total_tasks': total,
+            'approved_as_is': counts['approved_as_is'],
+            'edited': counts['edited'],
+            'rejected': counts['rejected'],
+            'approval_rate_pct': pct(counts['approved_as_is']),
+            'edit_rate_pct': pct(counts['edited']),
+            'rejection_rate_pct': pct(counts['rejected']),
+            'scope': 'all' if actor.get('role') == 'admin' else 'recruiter',
+        }
+        return success(payload, trc)
+
+    def match_quality(self, authorization, trc):
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        if actor['role'] not in {'recruiter', 'admin'}:
+            return fail('forbidden', 'Recruiter/admin only.', trc, status_code=403)
+        TOP_K = 5
+        eligible_statuses = {'awaiting_approval', 'completed', 'rejected'}
+        match_scores: list[float] = []
+        skill_overlap_pcts: list[float] = []
+        for task in self._scoped_tasks(actor):
+            if str(task.get('status') or '') not in eligible_statuses:
+                continue
+            shortlist = list((task.get('output') or {}).get('shortlist') or [])
+            shortlist = sorted(shortlist, key=lambda c: float(c.get('match_score') or 0), reverse=True)[:TOP_K]
+            for candidate in shortlist:
+                score = candidate.get('match_score')
+                if score is None:
+                    continue
+                try:
+                    match_scores.append(float(score))
+                except (TypeError, ValueError):
+                    continue
+                matched = len(candidate.get('skill_overlap') or [])
+                missing = len(candidate.get('missing_skills') or [])
+                required = matched + missing
+                skill_overlap_pcts.append((matched / required) * 100 if required else 0.0)
+        sample_size = len(match_scores)
+        avg_match = round(sum(match_scores) / sample_size, 1) if sample_size else 0.0
+        avg_overlap = round(sum(skill_overlap_pcts) / sample_size, 1) if sample_size else 0.0
+        return success({
+            'avg_match_score': avg_match,
+            'avg_skill_overlap_pct': avg_overlap,
+            'top_k': TOP_K,
+            'sample_size': sample_size,
+            'scope': 'all' if actor.get('role') == 'admin' else 'recruiter',
+        }, trc)
+
+    def _heuristic_coach_text(self, member: dict, job: dict, missing: list[str]) -> tuple[str, list[str]]:
+        title = job.get('title') or 'your target role'
+        top_skills = (missing or [])[:3]
+        if top_skills:
+            headline = f"{member.get('current_title') or 'Aspiring ' + title} | {' · '.join(top_skills)}"
+        else:
+            headline = member.get('headline') or f"Candidate for {title}"
+        tips: list[str] = []
+        if missing:
+            tips.append(f"Highlight projects or coursework involving {', '.join(missing[:3])}.")
+        tips.append('Quantify impact in your experience bullets (users, latency, revenue, accuracy).')
+        if not member.get('about_text') and not member.get('about'):
+            tips.append('Add a 2-3 sentence summary that names your specialization and target role.')
+        if job.get('seniority_level'):
+            tips.append(f"Mirror language used in {job.get('seniority_level')}-level job descriptions, e.g. 'led', 'owned', 'architected'.")
+        return headline[:100], tips[:4]
+
+    async def coach_suggest(self, payload, authorization, trc):
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        member_id = payload.get('member_id') or actor.get('sub')
+        target_job_id = payload.get('target_job_id') or payload.get('job_id')
+        if not member_id:
+            return fail('invalid_request', 'member_id is required', trc, status_code=400)
+        if not target_job_id:
+            return fail('invalid_request', 'target_job_id is required', trc, status_code=400)
+        # Members can only coach themselves; recruiters/admins can coach any member.
+        if actor.get('role') == 'member' and member_id != actor.get('sub'):
+            return fail('forbidden', 'Members can only request coaching for their own profile.', trc, status_code=403)
+
+        member = self.members.get(member_id)
+        if not member:
+            return fail('not_found', f'Member {member_id} not found', trc, status_code=404)
+        job = self.jobs.get(target_job_id)
+        if not job:
+            return fail('not_found', f'Job {target_job_id} not found', trc, status_code=404)
+
+        resume_text = collect_resume_text({}, member)
+        parsed = parse_resume(resume_text, member, {}).as_dict()
+        current_score, matched, missing, keyword_overlap, rationale, embedding_sim = self.matcher.score_candidate(job, member, parsed, resume_text)
+
+        improved_parsed = dict(parsed)
+        improved_parsed['skills'] = list(parsed.get('skills') or []) + list(missing or [])
+        improved_score, _, _, _, _, _ = self.matcher.score_candidate(job, member, improved_parsed, resume_text)
+
+        coach_output = None
+        try:
+            self.openrouter.refresh()
+            coach_output = await self.openrouter.coach_generate(member=member, job=job, missing_skills=missing, trace_id=trc)
+        except Exception as exc:
+            log_event(self.logger, 'coach_llm_failed', level=30, trace_id=trc, error=str(exc))
+
+        if coach_output and isinstance(coach_output.get('resume_tips'), list) and coach_output.get('suggested_headline'):
+            suggested_headline = str(coach_output['suggested_headline'])[:100]
+            resume_tips = [str(tip) for tip in coach_output['resume_tips'] if tip][:4]
+            served_by = self._provider_name()
+        else:
+            suggested_headline, resume_tips = self._heuristic_coach_text(member, job, missing)
+            served_by = 'heuristic'
+
+        log_event(self.logger, 'career_coach_generated', trace_id=trc, member_id=member_id, job_id=target_job_id, current_score=current_score, improved_score=improved_score, provider=served_by)
+        return success({
+            'member_id': member_id,
+            'target_job_id': target_job_id,
+            'suggested_headline': suggested_headline,
+            'skills_to_add': list(missing),
+            'resume_tips': resume_tips,
+            'current_match_score': current_score,
+            'match_score_if_improved': improved_score,
+            'score_delta': improved_score - current_score,
+            'rationale': rationale,
+            'provider': served_by,
+        }, trc)
+
     def get_task(self, task_id, authorization, trc):
         try:
             require_auth(authorization)
@@ -625,13 +778,29 @@ class AIOrchestratorService:
         task['status'] = 'completed'
         task['current_step'] = 'approved'
         output = self._ensure_output(task)
-        if payload.get('edits'):
-            output['draft_message'] = payload['edits']
-            drafts = list(output.get('outreach_drafts') or [])
-            if drafts:
-                drafts[0]['draft'] = payload['edits']
-                drafts[0]['message'] = payload['edits']
+        edits_raw = payload.get('edits')
+        drafts = list(output.get('outreach_drafts') or [])
+        any_edited = False
+
+        if isinstance(edits_raw, dict):
+            for draft in drafts:
+                cid = draft.get('candidate_id')
+                if cid is None or cid not in edits_raw:
+                    continue
+                new_text = edits_raw.get(cid)
+                if new_text is None:
+                    continue
+                original = str(draft.get('message') or draft.get('draft') or '').strip()
+                if str(new_text).strip() != original:
+                    any_edited = True
+                    draft['draft'] = new_text
+                    draft['message'] = new_text
+            if any_edited:
                 output['outreach_drafts'] = drafts
+                if drafts:
+                    output['draft_message'] = drafts[0].get('message', output.get('draft_message'))
+
+        task['approval_action'] = 'edited' if any_edited else 'approved_as_is'
         send_result = {'sent': [], 'failed': [], 'sent_count': 0}
         if payload.get('send_outreach', True) and bool(output.get('outreach_drafts')):
             send_result = await self._send_outreach_messages(task, actor['sub'], authorization, trc)
@@ -640,11 +809,12 @@ class AIOrchestratorService:
         self.cache_task(task_id, task)
         await self._emit_result(self._build_result_event(actor['sub'], task_id, task.get('input', {}).get('job_id'), 'approved', {
             'approval_state': 'approved',
+            'approval_action': task['approval_action'],
             'sent_messages': send_result.get('sent', []),
             'failed': send_result.get('failed', []),
             'sent_count': send_result.get('sent_count', 0),
         }, trc))
-        return success({'task_id': task_id, 'approval_state': 'approved', 'status': 'approved', 'sent_count': send_result.get('sent_count', 0), 'failed': send_result.get('failed', [])}, trc, {'event_dispatch': 'queued'})
+        return success({'task_id': task_id, 'approval_state': 'approved', 'approval_action': task['approval_action'], 'status': 'approved', 'sent_count': send_result.get('sent_count', 0), 'failed': send_result.get('failed', [])}, trc, {'event_dispatch': 'queued'})
 
     async def send_outreach(self, task_id, payload, authorization, trc):
         try:
@@ -672,13 +842,14 @@ class AIOrchestratorService:
         if not task:
             return fail('not_found', 'Task not found.', trc, status_code=404)
         task['approval_state'] = 'rejected'
+        task['approval_action'] = 'rejected'
         task['status'] = 'rejected'
         task['current_step'] = 'rejected'
         task['rejection_reason'] = payload.get('reason', 'No reason provided')
         self.repo.save_task(task)
         self.cache_task(task_id, task)
-        await self._emit_result(self._build_result_event(actor['sub'], task_id, task.get('input', {}).get('job_id'), 'rejected', {'reason': task['rejection_reason']}, trc))
-        return success({'task_id': task_id, 'approval_state': 'rejected', 'status': 'rejected'}, trc, {'event_dispatch': 'queued'})
+        await self._emit_result(self._build_result_event(actor['sub'], task_id, task.get('input', {}).get('job_id'), 'rejected', {'reason': task['rejection_reason'], 'approval_action': 'rejected'}, trc))
+        return success({'task_id': task_id, 'approval_state': 'rejected', 'approval_action': 'rejected', 'status': 'rejected'}, trc, {'event_dispatch': 'queued'})
 
     async def task_socket(self, websocket: WebSocket, task_id: str):
         await websocket.accept()

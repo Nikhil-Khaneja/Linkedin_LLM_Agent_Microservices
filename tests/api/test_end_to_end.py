@@ -93,7 +93,7 @@ def test_full_system_flow(clients):
             break
         time.sleep(0.25)
     assert status == 'waiting_for_approval'
-    approve = o8.post(f'/ai/tasks/{task_id}/approve', headers=RECRUITER, json={'edits': 'Hi Ava, your profile looks strong for this role.'})
+    approve = o8.post(f'/ai/tasks/{task_id}/approve', headers=RECRUITER, json={'edits': {'mem_501': 'Hi Ava, your profile looks strong for this role.'}})
     assert approve.status_code == 200
     final_task = o8.get(f'/ai/tasks/{task_id}', headers=RECRUITER)
     assert final_task.json()['data']['approval_state'] == 'approved'
