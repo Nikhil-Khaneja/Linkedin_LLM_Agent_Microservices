@@ -1,12 +1,18 @@
 import asyncio
+import os
 import uuid
 from datetime import datetime, timezone
 
-from services.shared.common import body_hash, build_event, check_idempotency, fail, record_idempotency, require_auth, success
+from services.shared.common import body_hash, build_event, check_idempotency, fail, record_idempotency, require_auth, success, trace_id
+from services.shared.kafka_bus import consume_forever, publish_event
 from services.shared.outbox import RelationalOutboxRepository, dispatch_outbox_forever
 from services.shared.repositories import JobRepository
 from services.shared.notifications import create_notification
 from services.shared.observability import get_logger, log_event
+
+
+def _kafka_first_submit_enabled() -> bool:
+    return str(os.environ.get('APPLICATION_SUBMIT_KAFKA_FIRST', '')).lower() in ('1', 'true', 'yes')
 
 
 class ApplicationsService:
@@ -22,6 +28,17 @@ class ApplicationsService:
         if not self.tasks:
             log_event(self.logger, 'applications_outbox_dispatcher_starting', action='startup')
             self.tasks.append(asyncio.create_task(dispatch_outbox_forever(self.outbox, self.stop_event)))
+            self.tasks.append(
+                asyncio.create_task(
+                    consume_forever(
+                        ['application.submit.requested'],
+                        'applications-submit-worker',
+                        self._submit_request_consumer,
+                        self.stop_event,
+                    )
+                )
+            )
+            log_event(self.logger, 'applications_submit_kafka_consumer_started', action='startup', topic='application.submit.requested')
 
     async def shutdown(self):
         self.stop_event.set()
@@ -32,6 +49,87 @@ class ApplicationsService:
         self.tasks.clear()
         self.stop_event = asyncio.Event()
         log_event(self.logger, 'applications_outbox_dispatcher_stopped', action='shutdown')
+
+    async def _submit_request_consumer(self, topic: str, kafka_msg: dict) -> None:
+        if kafka_msg.get('event_type') != 'application.submit.requested':
+            return
+        inner = kafka_msg.get('payload') or {}
+        application_id = inner.get('application_id')
+        job_id = inner.get('job_id')
+        member_id = inner.get('member_id')
+        if not application_id or not job_id or not member_id:
+            log_event(self.logger, 'submit_request_consumer_invalid_payload', topic=topic, error_code='invalid_payload')
+            return
+        if self.repo.get(application_id):
+            return
+        job = self.jobs_repo.get(job_id)
+        if not job:
+            log_event(self.logger, 'submit_request_consumer_job_missing', job_id=job_id, application_id=application_id)
+            return
+        if str(job.get('status') or 'open').lower() != 'open':
+            log_event(self.logger, 'submit_request_consumer_job_closed', job_id=job_id, application_id=application_id)
+            return
+        if self.repo.find_duplicate(job_id, member_id):
+            return
+        trc = kafka_msg.get('trace_id') or trace_id(None)
+        payload_with_member = {
+            'job_id': job_id,
+            'member_id': member_id,
+            'application_id': application_id,
+            'resume_ref': inner.get('resume_ref'),
+            'cover_letter': inner.get('cover_letter'),
+            'status': inner.get('status') or 'submitted',
+            'application_datetime': inner.get('application_datetime'),
+        }
+        submitted_event = build_event(
+            event_type='application.submitted',
+            actor_id=member_id,
+            entity_type='application',
+            entity_id=application_id,
+            payload={
+                'job_id': job_id,
+                'member_id': member_id,
+                'resume_ref': inner.get('resume_ref'),
+                'status': 'submitted',
+                'city': inner.get('city') or 'San Jose',
+            },
+            trace=trc,
+            idempotency_key=inner.get('client_idempotency_key') or f'application.submitted:{application_id}',
+        )
+        try:
+            self.repo.create_with_outbox(payload_with_member, 'application.submitted', submitted_event)
+            log_event(
+                self.logger,
+                'submit_request_consumer_persisted',
+                trace_id=trc,
+                application_id=application_id,
+                job_id=job_id,
+                member_id=member_id,
+            )
+        except Exception as exc:
+            log_event(
+                self.logger,
+                'submit_request_consumer_failed',
+                trace_id=trc,
+                application_id=application_id,
+                job_id=job_id,
+                member_id=member_id,
+                error_message=str(exc),
+            )
+            return
+        try:
+            create_notification(
+                member_id,
+                'application.submitted',
+                'Application submitted',
+                f"Your application for {job.get('title') or job_id} was received.",
+                actor_id=member_id,
+                actor_name=member_id,
+                target_url='/jobs',
+                data={'application_id': application_id, 'job_id': job_id},
+            )
+        except Exception as exc:
+            log_event(self.logger, 'submit_request_consumer_notification_failed', application_id=application_id, error_message=str(exc))
 
     async def submit(self, payload, authorization, trc, idempotency_key=None):
         log_event(
@@ -108,6 +206,44 @@ class ApplicationsService:
             trace=trc,
             idempotency_key=key,
         )
+
+        if _kafka_first_submit_enabled():
+            command = build_event(
+                event_type='application.submit.requested',
+                actor_id=member_id,
+                entity_type='application',
+                entity_id=application_id,
+                payload={
+                    'application_id': application_id,
+                    'job_id': job_id,
+                    'member_id': member_id,
+                    'resume_ref': payload.get('resume_ref'),
+                    'cover_letter': payload.get('cover_letter'),
+                    'application_datetime': applied_at,
+                    'status': 'submitted',
+                    'city': payload.get('city') or job.get('city') or 'San Jose',
+                    'client_idempotency_key': key,
+                },
+                trace=trc,
+                idempotency_key=f'application.submit.requested:{application_id}',
+            )
+            published = await publish_event('application.submit.requested', command)
+            if not published:
+                log_event(self.logger, 'application_submit_kafka_publish_failed', trace_id=trc, action='submit', route=route, application_id=application_id)
+                return fail('kafka_publish_failed', 'Could not enqueue application submit; retry shortly.', trc, None, True, 503)
+            data = {
+                'application_id': application_id,
+                'job_id': job_id,
+                'member_id': member_id,
+                'status': 'accepted',
+                'application_datetime': applied_at,
+            }
+            meta = {'async': True, 'write_state': 'pending', 'event_dispatch': 'kafka', 'topic': 'application.submit.requested'}
+            response = {'trace_id': trc, 'data': data, 'meta': meta}
+            record_idempotency(route, key, h, response)
+            log_event(self.logger, 'application_submit_accepted_async', trace_id=trc, action='submit', route=route, application_id=application_id, member_id=member_id, job_id=job_id, idempotency_key=key)
+            return success(data, trc, meta)
+
         try:
             row = self.repo.create_with_outbox(payload_with_member, 'application.submitted', event)
             log_event(self.logger, 'application_submit_persisted', trace_id=trc, action='submit', route=route, application_id=application_id, member_id=member_id, job_id=job_id, recruiter_id=job.get('recruiter_id'), outbox_topic='application.submitted', idempotency_key=event.get('idempotency_key'))

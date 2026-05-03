@@ -63,7 +63,7 @@ export default function MessagingPage() {
     };
 
     const fetchMemberPreview = async () => {
-      const { data } = await axios.post(`${BASE.member}/members/get`, { member_id: userId }, authCfg);
+      const { data } = await axios.post(`${BASE.member}/members/get`, { member_id: userId, media_public_base: BASE.member }, authCfg);
       const profile = data?.data?.profile;
       if (!profile) throw new Error('member_not_found');
       return {

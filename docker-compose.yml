@@ -2,14 +2,15 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: linkedin_sim
     ports:
-      - "3306:3306"
+      # Host port (avoid 3306 if another mysqld is already on your Mac — set MYSQL_PUBLISH_PORT=3307 in .env)
+      - "${MYSQL_PUBLISH_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -proot --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -41,7 +42,6 @@ services:
 
   kafka:
     image: apache/kafka:4.2.0
-    container_name: kafka
     hostname: kafka
     ports:
       - "9092:9092"
@@ -111,13 +111,12 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PUBLISH_PORT:-3000}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   auth_service:
@@ -133,7 +132,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -180,7 +179,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -195,6 +194,9 @@ services:
       JWT_ISSUER: owner1-auth
       JWT_AUDIENCE: linkedin-clone
       OWNER1_JWKS_URL: http://auth_service:8001/.well-known/jwks.json
+      # Browser loads profile photos via GET /members/media; must match host:port users use for the member API.
+      MEMBER_PUBLIC_URL: ${MEMBER_PUBLIC_URL:-http://localhost:8002}
+      MEDIA_SIG_SECRET: ${MEDIA_SIG_SECRET:-dev-media-signature-local}
     depends_on:
       auth_service:
         condition: service_healthy
@@ -223,7 +225,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -264,7 +266,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -307,7 +309,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -322,6 +324,7 @@ services:
       JWT_ISSUER: owner1-auth
       JWT_AUDIENCE: linkedin-clone
       OWNER1_JWKS_URL: http://auth_service:8001/.well-known/jwks.json
+      APPLICATION_SUBMIT_KAFKA_FIRST: 'true'
     depends_on:
       auth_service:
         condition: service_healthy
@@ -352,7 +355,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -393,7 +396,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -438,7 +441,7 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: linkedin_sim
       MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MONGO_URL: mongodb://mongo:27017
       MONGO_DATABASE: linkedin_sim_docs
       MINIO_ENDPOINT: minio:9000
@@ -478,10 +481,13 @@ services:
   frontend:
     image: node:20
     working_dir: /web
-    command: sh -lc "npm install && PORT=5173 npm start"
+    # HOST=0.0.0.0: dev server must listen on all interfaces inside the container or host:5173 gets ERR_CONNECTION_RESET.
+    command: sh -lc "npm install && HOST=0.0.0.0 PORT=5173 WDS_SOCKET_PORT=0 npm start"
     volumes:
       - ./frontend:/web
     environment:
+      HOST: "0.0.0.0"
+      WDS_SOCKET_PORT: "0"
       REACT_APP_AUTH_URL: http://localhost:8001
       REACT_APP_MEMBER_URL: http://localhost:8002
       REACT_APP_RECRUITER_URL: http://localhost:8003
@@ -512,9 +518,10 @@ services:
       - "5173:5173"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
-      interval: 20s
+      start_period: 300s
+      interval: 15s
       timeout: 10s
-      retries: 30
+      retries: 40
 
 volumes:
   mysql_data:

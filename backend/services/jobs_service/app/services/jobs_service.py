@@ -153,9 +153,6 @@ class JobsService:
             set_json(cache_key, job, self.TTL_JOB_DETAIL)
         if not job:
             return fail('not_found', 'Job posting does not exist.', trc, status_code=404)
-        viewer_id = payload.get('viewer_id') or actor['sub']
-        event = build_event(event_type='job.viewed', actor_id=viewer_id, entity_type='job', entity_id=job['job_id'], payload={'job_id': job['job_id']}, trace=trc, idempotency_key=f'view:{viewer_id}:{job["job_id"]}:{trc}')
-        self.outbox.enqueue(topic='job.viewed', event=event, aggregate_type='job', aggregate_id=job['job_id'])
         if actor.get('role') == 'member':
             pending_saved = get_json(self._pending_saved_key(actor['sub'])) or {}
             is_saved = self.repo.is_saved_by_member(job['job_id'], actor['sub'])
@@ -203,27 +200,41 @@ class JobsService:
         employment_type = payload.get('employment_type')
         work_mode = payload.get('work_mode')
         remote = payload.get('remote')
+        filter_salary_min = payload.get('salary_min')
+        filter_salary_max = payload.get('salary_max')
+        try:
+            filter_salary_min = int(filter_salary_min) if filter_salary_min not in (None, '') else None
+        except (TypeError, ValueError):
+            filter_salary_min = None
+        try:
+            filter_salary_max = int(filter_salary_max) if filter_salary_max not in (None, '') else None
+        except (TypeError, ValueError):
+            filter_salary_max = None
+
+        try:
+            page = int(payload.get('page', 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = max(1, page)
+        try:
+            page_size = int(payload.get('page_size', 10))
+        except (TypeError, ValueError):
+            page_size = 10
+        page_size = max(1, min(page_size, 10000))
+
+        rows, total = self.repo.search_jobs_paginated(
+            keyword=keyword,
+            location=location,
+            employment_type=employment_type or None,
+            work_mode=work_mode or None,
+            remote=bool(remote),
+            salary_min=filter_salary_min,
+            salary_max=filter_salary_max,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
         items = []
-        for job in self.repo.search():
-            text = " ".join([
-                str(job.get('title', '')),
-                str(job.get('description', '')),
-                str(job.get('description_text', '')),
-                str(job.get('company_name', '')),
-                str(job.get('location', '')),
-                str(job.get('city', '')),
-                str(job.get('state', '')),
-            ]).lower()
-            if keyword and keyword not in text:
-                continue
-            if location and location not in text:
-                continue
-            if employment_type and employment_type != job.get('employment_type'):
-                continue
-            if work_mode and work_mode != job.get('work_mode'):
-                continue
-            if remote is True and job.get('work_mode') != 'remote':
-                continue
+        for job in rows:
             display_location = job.get('location') or ', '.join([v for v in [job.get('city'), job.get('state')] if v])
             items.append({
                 'job_id': job['job_id'],
@@ -235,17 +246,16 @@ class JobsService:
                 'status': job.get('status', 'open'),
                 'work_mode': job.get('work_mode'),
                 'employment_type': job.get('employment_type'),
+                'salary_min': job.get('salary_min'),
+                'salary_max': job.get('salary_max'),
+                'salary_currency': job.get('salary_currency') or 'USD',
                 'applicants_count': job.get('applicants_count', 0),
                 'posted_at': job.get('posted_at') or job.get('created_at'),
             })
         if actor.get('role') == 'member':
             items = self._apply_saved_overlay(items, actor.get('sub'))
-        items.sort(key=lambda j: (j.get('status') != 'open', j.get('title') or ''))
-        page = int(payload.get('page', 1))
-        page_size = int(payload.get('page_size', 10))
-        start = (page - 1) * page_size
-        body = {'items': items[start:start + page_size]}
-        meta = {'page': page, 'page_size': page_size, 'total': len(items), 'cache': 'miss'}
+        body = {'items': items}
+        meta = {'page': page, 'page_size': page_size, 'total': total, 'cache': 'miss'}
         set_json(cache_key, {'data': body, 'meta': meta}, self.TTL_JOB_SEARCH)
         return success(body, trc, meta)
 
@@ -278,8 +288,16 @@ class JobsService:
         if actor['role'] != 'admin' and actor['sub'] != recruiter_id:
             return fail('forbidden', 'You cannot list jobs for another recruiter.', trc, status_code=403)
         status_filter = payload.get('status', 'all')
-        page = int(payload.get('page', 1))
-        page_size = int(payload.get('page_size', 50))
+        try:
+            page = int(payload.get('page', 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = max(1, page)
+        try:
+            page_size = int(payload.get('page_size', 50))
+        except (TypeError, ValueError):
+            page_size = 50
+        page_size = max(1, min(page_size, 10000))
         cache_key = f'jobs:recruiter:{recruiter_id}:{status_filter}:{page}:{page_size}'
         cached = get_json(cache_key)
         if cached:
@@ -287,9 +305,9 @@ class JobsService:
             body['items'] = self._merge_pending_recruiter_jobs(recruiter_id, body.get('items', []))
             body['items'].sort(key=lambda j: (j.get('status') != 'open', j.get('title') or ''))
             return success(body, trc, {**cached['meta'], 'cache': 'hit'})
-        items = []
-        for job in self.repo.list_by_recruiter(recruiter_id, status_filter):
-            items.append({
+
+        def _recruiter_list_row(job: dict) -> dict:
+            return {
                 'job_id': job['job_id'],
                 'title': job.get('title', ''),
                 'company_name': job.get('company_name', ''),
@@ -301,11 +319,22 @@ class JobsService:
                 'status': job.get('status', 'open'),
                 'applicants_count': job.get('applicants_count', 0),
                 'version': job.get('version'),
-            })
-        items = self._merge_pending_recruiter_jobs(recruiter_id, items)
-        items.sort(key=lambda j: (j.get('status') != 'open', j.get('title') or ''))
-        body = {'items': items[(page - 1) * page_size: page * page_size]}
-        meta = {'total': len(items), 'page': page, 'page_size': page_size, 'cache': 'miss'}
+            }
+
+        pending = get_json(self._pending_recruiter_key(recruiter_id)) or {}
+        if pending:
+            items = [_recruiter_list_row(j) for j in self.repo.list_by_recruiter(recruiter_id, status_filter)]
+            items = self._merge_pending_recruiter_jobs(recruiter_id, items)
+            items.sort(key=lambda j: (j.get('status') != 'open', j.get('title') or ''))
+            total = len(items)
+            body = {'items': items[(page - 1) * page_size : page * page_size]}
+        else:
+            total = self.repo.count_jobs_by_recruiter(recruiter_id, status_filter)
+            rows = self.repo.list_by_recruiter(
+                recruiter_id, status_filter, limit=page_size, offset=(page - 1) * page_size
+            )
+            body = {'items': [_recruiter_list_row(j) for j in rows]}
+        meta = {'total': total, 'page': page, 'page_size': page_size, 'cache': 'miss'}
         set_json(cache_key, {'data': body, 'meta': meta}, self.TTL_RECRUITER_LIST)
         return success(body, trc, meta)
 

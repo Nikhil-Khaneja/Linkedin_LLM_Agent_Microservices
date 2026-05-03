@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 from typing import Any
@@ -327,8 +330,8 @@ class JobRepository:
         full = {**payload, "job_id": job_id, "status": payload.get("status", "open"), "version": payload.get("version", 1)}
         execute(
             """
-            INSERT INTO jobs (job_id, company_id, recruiter_id, title, description_text, seniority_level, employment_type, location_text, work_mode, status, version, payload_json)
-            VALUES (:job_id, :company_id, :recruiter_id, :title, :description_text, :seniority_level, :employment_type, :location_text, :work_mode, :status, :version, :payload_json)
+            INSERT INTO jobs (job_id, company_id, recruiter_id, title, description_text, seniority_level, employment_type, location_text, salary_min, salary_max, salary_currency, work_mode, status, version, payload_json)
+            VALUES (:job_id, :company_id, :recruiter_id, :title, :description_text, :seniority_level, :employment_type, :location_text, :salary_min, :salary_max, :salary_currency, :work_mode, :status, :version, :payload_json)
             """,
             {
                 "job_id": full["job_id"],
@@ -339,6 +342,9 @@ class JobRepository:
                 "seniority_level": full.get("seniority_level"),
                 "employment_type": full.get("employment_type"),
                 "location_text": full.get("location"),
+                "salary_min": full.get("salary_min"),
+                "salary_max": full.get("salary_max"),
+                "salary_currency": full.get("salary_currency") or "USD",
                 "work_mode": full.get("work_mode"),
                 "status": full.get("status"),
                 "version": full.get("version", 1),
@@ -366,7 +372,7 @@ class JobRepository:
         current.update({k: v for k, v in updates.items() if k not in {"job_id", "expected_version"}})
         current["version"] = current.get("version", 1) + 1
         execute(
-            "UPDATE jobs SET company_id=:company_id, recruiter_id=:recruiter_id, title=:title, description_text=:description_text, seniority_level=:seniority_level, employment_type=:employment_type, location_text=:location_text, work_mode=:work_mode, status=:status, version=:version, payload_json=:payload_json WHERE job_id=:job_id",
+            "UPDATE jobs SET company_id=:company_id, recruiter_id=:recruiter_id, title=:title, description_text=:description_text, seniority_level=:seniority_level, employment_type=:employment_type, location_text=:location_text, salary_min=:salary_min, salary_max=:salary_max, salary_currency=:salary_currency, work_mode=:work_mode, status=:status, version=:version, payload_json=:payload_json WHERE job_id=:job_id",
             {
                 "job_id": job_id,
                 "company_id": current.get("company_id"),
@@ -376,6 +382,9 @@ class JobRepository:
                 "seniority_level": current.get("seniority_level"),
                 "employment_type": current.get("employment_type"),
                 "location_text": current.get("location"),
+                "salary_min": current.get("salary_min"),
+                "salary_max": current.get("salary_max"),
+                "salary_currency": current.get("salary_currency") or "USD",
                 "work_mode": current.get("work_mode"),
                 "status": current.get("status"),
                 "version": current["version"],
@@ -767,13 +776,14 @@ def _job_create_with_outbox(self, payload: dict[str, Any], topic: str, event: di
     outbox_id = f"out_{uuid4().hex[:12]}"
     with cursor_ctx() as cur:
         q1 = """
-        INSERT INTO jobs (job_id, company_id, recruiter_id, title, description_text, seniority_level, employment_type, location_text, work_mode, status, version, payload_json)
-        VALUES (:job_id, :company_id, :recruiter_id, :title, :description_text, :seniority_level, :employment_type, :location_text, :work_mode, :status, :version, :payload_json)
+        INSERT INTO jobs (job_id, company_id, recruiter_id, title, description_text, seniority_level, employment_type, location_text, salary_min, salary_max, salary_currency, work_mode, status, version, payload_json)
+        VALUES (:job_id, :company_id, :recruiter_id, :title, :description_text, :seniority_level, :employment_type, :location_text, :salary_min, :salary_max, :salary_currency, :work_mode, :status, :version, :payload_json)
         """
         params1 = {
             'job_id': full['job_id'], 'company_id': full.get('company_id'), 'recruiter_id': full.get('recruiter_id'), 'title': full.get('title'),
             'description_text': full.get('description'), 'seniority_level': full.get('seniority_level'), 'employment_type': full.get('employment_type'),
-            'location_text': full.get('location'), 'work_mode': full.get('work_mode'), 'status': full.get('status'), 'version': full.get('version', 1),
+            'location_text': full.get('location'), 'salary_min': full.get('salary_min'), 'salary_max': full.get('salary_max'), 'salary_currency': full.get('salary_currency') or 'USD',
+            'work_mode': full.get('work_mode'), 'status': full.get('status'), 'version': full.get('version', 1),
             'payload_json': _to_json(full),
         }
         cur.execute(_adapt_sql(q1), _params_for_query(q1, params1))
@@ -798,8 +808,8 @@ def _job_update_with_outbox(self, job_id: str, updates: dict[str, Any], topic: s
     current['version'] = current.get('version', 1) + 1
     outbox_id = f"out_{uuid4().hex[:12]}"
     with cursor_ctx() as cur:
-        q1 = "UPDATE jobs SET company_id=:company_id, recruiter_id=:recruiter_id, title=:title, description_text=:description_text, seniority_level=:seniority_level, employment_type=:employment_type, location_text=:location_text, work_mode=:work_mode, status=:status, version=:version, payload_json=:payload_json WHERE job_id=:job_id"
-        params1 = {'job_id': job_id, 'company_id': current.get('company_id'), 'recruiter_id': current.get('recruiter_id'), 'title': current.get('title'), 'description_text': current.get('description'), 'seniority_level': current.get('seniority_level'), 'employment_type': current.get('employment_type'), 'location_text': current.get('location'), 'work_mode': current.get('work_mode'), 'status': current.get('status'), 'version': current['version'], 'payload_json': _to_json(current)}
+        q1 = "UPDATE jobs SET company_id=:company_id, recruiter_id=:recruiter_id, title=:title, description_text=:description_text, seniority_level=:seniority_level, employment_type=:employment_type, location_text=:location_text, salary_min=:salary_min, salary_max=:salary_max, salary_currency=:salary_currency, work_mode=:work_mode, status=:status, version=:version, payload_json=:payload_json WHERE job_id=:job_id"
+        params1 = {'job_id': job_id, 'company_id': current.get('company_id'), 'recruiter_id': current.get('recruiter_id'), 'title': current.get('title'), 'description_text': current.get('description'), 'seniority_level': current.get('seniority_level'), 'employment_type': current.get('employment_type'), 'location_text': current.get('location'), 'salary_min': current.get('salary_min'), 'salary_max': current.get('salary_max'), 'salary_currency': current.get('salary_currency') or 'USD', 'work_mode': current.get('work_mode'), 'status': current.get('status'), 'version': current['version'], 'payload_json': _to_json(current)}
         cur.execute(_adapt_sql(q1), _params_for_query(q1, params1))
         q2 = _sql_insert_ignore(
             """INSERT OR IGNORE INTO outbox_events (outbox_id, topic, event_type, aggregate_type, aggregate_id, payload_json, trace_id, idempotency_key, status, attempts, available_at) VALUES (:outbox_id,:topic,:event_type,:aggregate_type,:aggregate_id,:payload_json,:trace_id,:idempotency_key,:status,:attempts,:available_at)""",
@@ -910,9 +920,10 @@ class AnalyticsRollupRepository:
             existing['statuses'] = statuses
             replace_one('events_rollup', {'rollup_id': rid}, existing, upsert=True)
 
-    def top_jobs(self, metric: str, limit: int) -> list[dict[str, Any]]:
+    def top_jobs(self, metric: str, limit: int, sort: str = 'desc') -> list[dict[str, Any]]:
         rows = [r for r in find_many('events_rollup', {'kind': 'job_metric'}) if r.get('metric') == metric]
-        rows.sort(key=lambda r: int(r.get('count', 0)), reverse=True)
+        reverse = (sort or 'desc').lower() != 'asc'
+        rows.sort(key=lambda r: int(r.get('count', 0)), reverse=reverse)
         return rows[:limit]
 
     def funnel(self, job_id: str) -> dict[str, Any]:
@@ -930,21 +941,15 @@ class AnalyticsRollupRepository:
 
 
 # --- patched bindings for MySQL-only runtime stability ---
-def _jobrepo_search_impl(self):
-    rows = fetch_all(
-        """
-        SELECT job_id, company_id, recruiter_id, title, description_text, seniority_level,
-               employment_type, location_text, work_mode, status, version, payload_json, created_at
-        FROM jobs
-        ORDER BY created_at DESC
-        """
-    )
+def _jobs_sql_rows_to_items(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return []
     company_names = _load_company_names([row.get('company_id') for row in rows])
     applicant_counts = _load_job_application_counts([row.get('job_id') for row in rows])
-    items = []
+    items: list[dict[str, Any]] = []
     for row in rows:
         payload = _from_json(row.get('payload_json'), {})
-        item = {
+        item: dict[str, Any] = {
             'job_id': row.get('job_id'),
             'company_id': row.get('company_id'),
             'recruiter_id': row.get('recruiter_id'),
@@ -955,6 +960,9 @@ def _jobrepo_search_impl(self):
             'employment_type': row.get('employment_type'),
             'location': row.get('location_text'),
             'location_text': row.get('location_text'),
+            'salary_min': row.get('salary_min'),
+            'salary_max': row.get('salary_max'),
+            'salary_currency': row.get('salary_currency') or 'USD',
             'work_mode': row.get('work_mode'),
             'status': row.get('status'),
             'version': row.get('version'),
@@ -967,53 +975,255 @@ def _jobrepo_search_impl(self):
             item.update(payload)
         item['company_name'] = item.get('company_name') or company_names.get(row.get('company_id'), '')
         item['applicants_count'] = applicant_counts.get(row.get('job_id'), item.get('applicants_count', 0))
+        for k in ('salary_min', 'salary_max', 'salary_currency'):
+            if item.get(k) is None and row.get(k) is not None:
+                item[k] = row.get(k)
         items.append(item)
     return items
 
 
-def _jobrepo_list_by_recruiter_impl(self, recruiter_id: str, status: str):
-    params = {'recruiter_id': recruiter_id}
+def _jobrepo_search_impl(self):
+    rows = fetch_all(
+        """
+        SELECT job_id, company_id, recruiter_id, title, description_text, seniority_level,
+               employment_type, location_text, salary_min, salary_max, salary_currency,
+               work_mode, status, version, payload_json, created_at
+        FROM jobs
+        ORDER BY created_at DESC
+        """
+    )
+    return _jobs_sql_rows_to_items(rows)
+
+
+def _jobs_table_row_estimate() -> int:
+    """InnoDB row estimate from stats (fast). Used to avoid COUNT(*) scans on huge unfiltered job tables."""
+    row = fetch_one(
+        "SELECT TABLE_ROWS AS n FROM information_schema.TABLES "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'jobs' LIMIT 1"
+    )
+    try:
+        return max(0, int((row or {}).get('n') or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _search_tokens(s: str) -> str:
+    parts = re.findall(r'[a-zA-Z0-9]+', (s or '').lower())[:16]
+    return ' '.join(parts)
+
+
+_jobs_ft_probe_ts = 0.0
+_jobs_ft_available: bool | None = None
+
+
+def _jobs_fulltext_index_available() -> bool:
+    """True when infra/mysql/006_jobs_fulltext.sql has been applied (cached ~60s)."""
+    global _jobs_ft_probe_ts, _jobs_ft_available
+    now = time.monotonic()
+    if _jobs_ft_available is not None and (now - _jobs_ft_probe_ts) < 60.0:
+        return _jobs_ft_available
+    row = fetch_one(
+        """
+        SELECT 1 AS ok FROM information_schema.statistics
+        WHERE table_schema = DATABASE() AND table_name = 'jobs' AND index_name = 'ft_jobs_title_location'
+        LIMIT 1
+        """,
+        {},
+    )
+    _jobs_ft_available = bool(row)
+    _jobs_ft_probe_ts = now
+    return _jobs_ft_available
+
+
+def _jobrepo_search_jobs_paginated_impl(
+    self,
+    *,
+    keyword: str,
+    location: str,
+    employment_type: str | None,
+    work_mode: str | None,
+    remote: bool,
+    salary_min: int | None,
+    salary_max: int | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Filter + paginate in SQL so large datasets are not loaded into Python."""
+    from services.shared.cache import get_json, set_json
+
+    _t0 = time.monotonic()
+    params: dict[str, Any] = {}
+    where: list[str] = ['1=1']
+
+    def _like_pat(s: str) -> str:
+        return '%' + s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+
+    use_ft = _jobs_fulltext_index_available()
+    if keyword:
+        kw_nat = _search_tokens(keyword)
+        params['kw_like'] = _like_pat(keyword.lower())
+        if use_ft and len(kw_nat) >= 2:
+            params['ft_nat_kw'] = kw_nat
+            where.append(
+                '(MATCH(j.title, j.location_text) AGAINST (:ft_nat_kw IN NATURAL LANGUAGE MODE) '
+                'OR LOWER(IFNULL(c.company_name,\'\')) LIKE LOWER(:kw_like))'
+            )
+        else:
+            where.append(
+                '(LOWER(j.title) LIKE LOWER(:kw_like) OR LOWER(IFNULL(j.location_text,\'\')) LIKE LOWER(:kw_like) '
+                'OR LOWER(IFNULL(c.company_name,\'\')) LIKE LOWER(:kw_like))'
+            )
+    if location:
+        loc_nat = _search_tokens(location)
+        params['loc_like'] = _like_pat(location.lower())
+        if use_ft and len(loc_nat) >= 2:
+            params['ft_nat_loc'] = loc_nat
+            where.append(
+                '(MATCH(j.title, j.location_text) AGAINST (:ft_nat_loc IN NATURAL LANGUAGE MODE) '
+                'OR LOWER(IFNULL(c.company_name,\'\')) LIKE LOWER(:loc_like) OR LOWER(j.title) LIKE LOWER(:loc_like))'
+            )
+        else:
+            where.append(
+                '(LOWER(IFNULL(j.location_text,\'\')) LIKE LOWER(:loc_like) OR LOWER(j.title) LIKE LOWER(:loc_like) '
+                'OR LOWER(IFNULL(c.company_name,\'\')) LIKE LOWER(:loc_like))'
+            )
+    if employment_type:
+        where.append('j.employment_type = :employment_type')
+        params['employment_type'] = employment_type
+    if work_mode:
+        where.append('j.work_mode = :work_mode')
+        params['work_mode'] = work_mode
+    if remote:
+        where.append("j.work_mode = 'remote'")
+    if salary_min is not None or salary_max is not None:
+        where.append('(j.salary_min IS NOT NULL OR j.salary_max IS NOT NULL)')
+        if salary_min is not None:
+            where.append('COALESCE(j.salary_max, j.salary_min) >= :salary_min')
+            params['salary_min'] = int(salary_min)
+        if salary_max is not None:
+            where.append('COALESCE(j.salary_min, j.salary_max) <= :salary_max')
+            params['salary_max'] = int(salary_max)
+
+    join_sql = """
+        FROM jobs j
+        LEFT JOIN companies c ON c.company_id = j.company_id
+    """
+    where_sql = ' WHERE ' + ' AND '.join(where)
+    unfiltered = (
+        not keyword
+        and not location
+        and employment_type is None
+        and work_mode is None
+        and not remote
+        and salary_min is None
+        and salary_max is None
+    )
+    # Always created_at: uses idx_jobs_created_at; avoids huge filesorts on filtered lists.
+    order_sql = ' ORDER BY j.created_at DESC'
+
+    count_cached = False
+    if unfiltered:
+        est = _jobs_table_row_estimate()
+        if est > 0:
+            total = est
+        else:
+            cnt_row = fetch_one('SELECT COUNT(*) AS cnt FROM jobs', {})
+            total = int((cnt_row or {}).get('cnt') or 0)
+    else:
+        count_sig = hashlib.sha256(
+            json.dumps({'where': where_sql, 'join': join_sql, 'p': params}, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        count_key = f'jobs:search:count:v2:{count_sig}'
+        cached = get_json(count_key)
+        if isinstance(cached, dict) and cached.get('t') is not None:
+            total = int(cached['t'])
+            count_cached = True
+        else:
+            cnt_row = fetch_one('SELECT COUNT(*) AS cnt ' + join_sql + where_sql, params)
+            total = int((cnt_row or {}).get('cnt') or 0)
+            # Filtered COUNT(*) can take many seconds on ~30k rows with MATCH OR company LIKE; cache aggressively.
+            set_json(count_key, {'t': total}, 600)
+
+    _t_after_count = time.monotonic()
+    lim = max(1, min(int(limit), 10000))
+    off = max(0, int(offset))
+    params['lim'] = lim
+    params['off'] = off
+
+    select_sql = """
+        SELECT j.job_id, j.company_id, j.recruiter_id, j.title, j.description_text, j.seniority_level,
+               j.employment_type, j.location_text, j.salary_min, j.salary_max, j.salary_currency,
+               j.work_mode, j.status, j.version, j.payload_json, j.created_at
+    """ + join_sql + where_sql + order_sql + ' LIMIT :lim OFFSET :off'
+    rows = fetch_all(select_sql, params)
+    _t_after_select = time.monotonic()
+    items = _jobs_sql_rows_to_items(rows)
+    if unfiltered:
+        total = max(int(total), off + len(items))
+    # region agent log
+    _dbg = {
+        "sessionId": "13ab13",
+        "hypothesisId": "H4",
+        "location": "repositories.py:_jobrepo_search_jobs_paginated_impl",
+        "message": "search_timings_ms",
+        "data": {
+            "unfiltered": unfiltered,
+            "use_ft": use_ft,
+            "has_keyword": bool(keyword),
+            "has_location": bool(location),
+            "count_cached": count_cached,
+            "count_phase_ms": round((_t_after_count - _t0) * 1000, 2),
+            "select_phase_ms": round((_t_after_select - _t_after_count) * 1000, 2),
+            "total": int(total),
+            "n_rows": len(rows),
+            "limit": lim,
+            "offset": off,
+        },
+        "timestamp": int(time.time() * 1000),
+    }
+    for _p in (
+        "/Users/drashtishah/Linkedin_LLM_Agent_Microservices/.cursor/debug-13ab13.log",
+        "/tmp/debug-13ab13.log",
+    ):
+        try:
+            with open(_p, "a", encoding="utf-8") as _df:
+                _df.write(json.dumps(_dbg, default=str) + "\n")
+            break
+        except Exception:
+            continue
+    # endregion
+    return items, total
+
+
+def _jobrepo_count_jobs_by_recruiter_impl(self, recruiter_id: str, status: str) -> int:
+    params: dict[str, Any] = {'recruiter_id': recruiter_id}
+    sql = 'SELECT COUNT(*) AS cnt FROM jobs WHERE recruiter_id=:recruiter_id'
+    if status != 'all':
+        sql += ' AND status=:status'
+        params['status'] = status
+    row = fetch_one(sql, params)
+    return int((row or {}).get('cnt') or 0)
+
+
+def _jobrepo_list_by_recruiter_impl(self, recruiter_id: str, status: str, limit: int | None = None, offset: int = 0):
+    params: dict[str, Any] = {'recruiter_id': recruiter_id}
     sql = """
         SELECT job_id, company_id, recruiter_id, title, description_text, seniority_level,
-               employment_type, location_text, work_mode, status, version, payload_json, created_at
+               employment_type, location_text, salary_min, salary_max, salary_currency,
+               work_mode, status, version, payload_json, created_at
         FROM jobs
         WHERE recruiter_id=:recruiter_id
     """
     if status != 'all':
         sql += ' AND status=:status'
         params['status'] = status
-    sql += ' ORDER BY created_at DESC'
+    sql += ' ORDER BY (status <> \'open\') ASC, title ASC, created_at DESC'
+    if limit is not None:
+        sql += ' LIMIT :lim OFFSET :off'
+        params['lim'] = max(1, min(int(limit), 10000))
+        params['off'] = max(0, int(offset))
     rows = fetch_all(sql, params)
-    company_names = _load_company_names([row.get('company_id') for row in rows])
-    applicant_counts = _load_job_application_counts([row.get('job_id') for row in rows])
-    items = []
-    for row in rows:
-        payload = _from_json(row.get('payload_json'), {})
-        item = {
-            'job_id': row.get('job_id'),
-            'company_id': row.get('company_id'),
-            'recruiter_id': row.get('recruiter_id'),
-            'title': row.get('title'),
-            'description': row.get('description_text'),
-            'description_text': row.get('description_text'),
-            'seniority_level': row.get('seniority_level'),
-            'employment_type': row.get('employment_type'),
-            'location': row.get('location_text'),
-            'location_text': row.get('location_text'),
-            'work_mode': row.get('work_mode'),
-            'status': row.get('status'),
-            'version': row.get('version'),
-            'created_at': row.get('created_at'),
-            'posted_at': row.get('created_at'),
-            'company_name': company_names.get(row.get('company_id'), ''),
-            'applicants_count': applicant_counts.get(row.get('job_id'), 0),
-        }
-        if isinstance(payload, dict):
-            item.update(payload)
-        item['company_name'] = item.get('company_name') or company_names.get(row.get('company_id'), '')
-        item['applicants_count'] = applicant_counts.get(row.get('job_id'), item.get('applicants_count', 0))
-        items.append(item)
-    return items
+    return _jobs_sql_rows_to_items(rows)
 
 
 def _apprepo_find_duplicate_impl(self, job_id: str, member_id: str):
@@ -1261,6 +1471,8 @@ def _recruiter_company_impl(self, company_id: str):
 
 
 JobRepository.search = _jobrepo_search_impl
+JobRepository.search_jobs_paginated = _jobrepo_search_jobs_paginated_impl
+JobRepository.count_jobs_by_recruiter = _jobrepo_count_jobs_by_recruiter_impl
 JobRepository.list_by_recruiter = _jobrepo_list_by_recruiter_impl
 ApplicationRepository.find_duplicate = _apprepo_find_duplicate_impl
 ApplicationRepository.get = _apprepo_get_impl

@@ -12,6 +12,7 @@ const COLORS = ['#0a66c2','#057642','#7c3aed','#e68a00','#cc1016','#06b6d4','#ec
 
 export default function AnalyticsPage() {
   const { user } = useAuth();
+  const isRecruiter = user?.userType === 'recruiter';
   const [topJobs, setTopJobs] = useState([]);
   const [lowJobs, setLowJobs] = useState([]);
   const [geoData, setGeoData] = useState([]);
@@ -24,29 +25,62 @@ export default function AnalyticsPage() {
   const [geoJob, setGeoJob] = useState('');
   const [memberId, setMemberId] = useState('');
   const [benchmarks, setBenchmarks] = useState([]);
-  const [tab, setTab] = useState('recruiter');
+  const [tab, setTab] = useState('member');
+
+  const tabDefs = isRecruiter
+    ? [
+        ['recruiter', '📊 Recruiter hiring metrics'],
+        ['performance', '⚡ Performance & benchmarks'],
+      ]
+    : [['member', '👤 Your activity']];
+
+  const memberViewsForChart = useMemo(() => {
+    const byDate = new Map();
+    for (const entry of profileViews) {
+      const raw = String(entry.view_date || entry.date || '');
+      const d = raw.length >= 10 ? raw.slice(5, 10) : raw.slice(0, 10) || raw;
+      if (!d) continue;
+      const n = Number(entry.view_count ?? entry.count ?? 0);
+      byDate.set(d, (byDate.get(d) || 0) + n);
+    }
+    return Array.from(byDate.entries()).map(([date, view_count]) => ({ date, view_count }));
+  }, [profileViews]);
 
   const authCfg = useMemo(() => ({ headers: { Authorization: 'Bearer ' + localStorage.getItem('access_token') } }), []);
 
   useEffect(() => {
-    loadRecruiterDashboard();
-    loadMemberDashboard();
-    loadBenchmarks();
-  }, []);
+    setTab(isRecruiter ? 'recruiter' : 'member');
+  }, [isRecruiter]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (isRecruiter) {
+      loadRecruiterDashboard();
+      loadBenchmarks();
+      setProfileViews([]);
+      setAppStatus([]);
+    } else {
+      setTopJobs([]);
+      setLowJobs([]);
+      setClickData([]);
+      setSavedData([]);
+      setBenchmarks([]);
+      loadMemberDashboard();
+    }
+  }, [user?.userType, user?.principalId, user?.userId]);
 
   const loadRecruiterDashboard = async () => {
     try {
       const [topData, lowData, viewData, savedDataResp] = await Promise.all([
         axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric:'applications', window_days:30, limit:10 }, authCfg),
-        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric:'applications', window_days:30, limit:50 }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric:'applications', window_days:30, limit:5, sort: 'asc' }, authCfg),
         axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric:'views', window_days:7, limit:8 }, authCfg),
         axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric:'saves', window_days:7, limit:8 }, authCfg),
       ]);
       const jobs = topData.data?.data?.items || [];
       setTopJobs(jobs.map(j => ({ name: (j.title || j.job_id || 'Job').slice(0,20), count: j.count || j.metric_value || 0 })));
-      const allJobs = lowData.data?.data?.items || [];
-      const lowest = [...allJobs].sort((a,b) => ((a.count||a.metric_value||0)-(b.count||b.metric_value||0))).slice(0,5);
-      setLowJobs(lowest.map(j => ({ name: (j.title || j.job_id || 'Job').slice(0,20), count: j.count || j.metric_value || 0 })));
+      const lowItems = lowData.data?.data?.items || [];
+      setLowJobs(lowItems.map(j => ({ name: (j.title || j.job_id || 'Job').slice(0,20), count: j.count || j.metric_value || 0 })));
       const viewJobs = viewData.data?.data?.items || [];
       setClickData(viewJobs.map(j => ({ name: (j.title || j.job_id || 'Job').slice(0,18), clicks: j.count || j.metric_value || 0 })));
       const savedJobs = savedDataResp.data?.data?.items || [];
@@ -117,11 +151,19 @@ export default function AnalyticsPage() {
         Real-time insights powered by Kafka event pipeline
       </p>
 
-      <div style={S.tabs}>
-        {[['recruiter','📊 Recruiter Dashboard'],['member','👤 Member Dashboard'],['performance','⚡ Performance']].map(([key,label]) => (
-          <button key={key} onClick={() => setTab(key)} style={{ ...S.tab, ...(tab===key ? S.tabActive : {}) }}>{label}</button>
-        ))}
-      </div>
+      {tabDefs.length > 1 ? (
+        <div style={S.tabs}>
+          {tabDefs.map(([key, label]) => (
+            <button key={key} type="button" onClick={() => setTab(key)} style={{ ...S.tab, ...(tab === key ? S.tabActive : {}) }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.55)', marginBottom: 16 }}>
+          Hiring metrics and benchmarks are on the recruiter account. Here you only see your own member analytics.
+        </p>
+      )}
 
       {tab === 'recruiter' && (
         <div style={S.grid2}>
@@ -238,16 +280,35 @@ export default function AnalyticsPage() {
         <div style={S.grid2}>
           <div style={{ ...S.card, gridColumn:'1/-1' }}>
             <h2 style={S.ct}>Profile Views — Last 30 Days</h2>
-            <p style={S.cs}>Visible only to {memberId || 'the signed-in member'}.</p>
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={profileViews} margin={{ left:0, right:20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-                <XAxis dataKey="view_date" tick={{ fontSize:10 }} interval={4} />
-                <YAxis tick={{ fontSize:11 }} />
-                <Tooltip formatter={v=>[v,'Profile Views']} />
-                <Line type="monotone" dataKey="view_count" stroke="#0a66c2" strokeWidth={2.5} dot={{ fill:'#0a66c2', r:3 }} activeDot={{ r:6 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            <p style={S.cs}>Visible only to {memberId || 'the signed-in member'}. Totals sum per day (two views the same day count as 2).</p>
+            {memberViewsForChart.length > 0 && memberViewsForChart.length < 2 ? (
+              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)', marginBottom: 10 }}>
+                One day of data: using a bar instead of a line so the chart is readable.
+              </p>
+            ) : null}
+            {memberViewsForChart.length === 0 ? (
+              <p style={S.empty}>No profile view history yet.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                {memberViewsForChart.length >= 2 ? (
+                  <LineChart data={memberViewsForChart} margin={{ left: 0, right: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={4} />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip formatter={(v) => [v, 'Profile views']} />
+                    <Line type="monotone" dataKey="view_count" stroke="#0a66c2" strokeWidth={2.5} dot={{ fill: '#0a66c2', r: 4 }} activeDot={{ r: 6 }} />
+                  </LineChart>
+                ) : (
+                  <BarChart data={memberViewsForChart} margin={{ left: 0, right: 20, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip formatter={(v) => [v, 'Profile views']} />
+                    <Bar dataKey="view_count" fill="#0a66c2" radius={[4, 4, 0, 0]} maxBarSize={56} />
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+            )}
           </div>
 
           <div style={S.card}>

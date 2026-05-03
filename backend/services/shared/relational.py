@@ -21,6 +21,9 @@ def _db_config() -> dict[str, Any]:
         "cursorclass": DictCursor,
         "autocommit": False,
         "charset": "utf8mb4",
+        "connect_timeout": int(os.environ.get("MYSQL_CONNECT_TIMEOUT", "10")),
+        "read_timeout": int(os.environ.get("MYSQL_READ_TIMEOUT", "120")),
+        "write_timeout": int(os.environ.get("MYSQL_WRITE_TIMEOUT", "120")),
     }
 
 

@@ -3,16 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
-
-function timeAgo(d) {
-  if (!d) return '';
-  const days = Math.floor((Date.now() - new Date(d)) / 86400000);
-  if (days === 0) return 'Today';
-  if (days === 1) return '1 day ago';
-  if (days < 7) return `${days} days ago`;
-  if (days < 30) return `${Math.floor(days / 7)} week${days < 14 ? '' : 's'} ago`;
-  return `${Math.floor(days / 30)} month${days < 60 ? '' : 's'} ago`;
-}
+import { jobPostedAt, timeAgoPosted } from '../utils/timeAgo';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -38,13 +29,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!token) return;
-    axios.post(`${BASE.job}/jobs/search`, { page_size: 8 }, authCfg).then((r) => setJobs(r?.data?.data?.items || [])).catch(() => setJobs([]));
+    axios.post(`${BASE.job}/jobs/search`, { page: 1, page_size: 12 }, authCfg).then((r) => setJobs(r?.data?.data?.items || [])).catch(() => setJobs([]));
   }, [token]);
 
   useEffect(() => {
     if (!currentId || !token) return;
     loadApplied();
-    axios.post(`${BASE.member}/members/get`, { member_id: currentId }, authCfg).then((r) => setProfile(r?.data?.data?.profile || null)).catch(() => setProfile(null));
+    axios.post(`${BASE.member}/members/get`, { member_id: currentId, media_public_base: BASE.member }, authCfg).then((r) => setProfile(r?.data?.data?.profile || null)).catch(() => setProfile(null));
   }, [currentId, token]);
 
   const displayName = profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
@@ -60,6 +51,9 @@ export default function DashboardPage() {
             <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 8, marginBottom: 2 }}>{displayName || user?.email?.split('@')[0] || 'Your profile'}</h3>
             <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', marginBottom: 12 }}>{profile?.headline || 'Add a headline'}</p>
             <Link to="/profile" style={S.viewProfile}>View full profile</Link>
+            <Link to="/analytics" style={{ ...S.viewProfile, display: 'block', marginTop: 10, textAlign: 'center' }}>
+              View analytics dashboard
+            </Link>
           </div>
         </div>
       </aside>
@@ -91,7 +85,7 @@ function JobCard({ job, navigate, isApplied }) {
           <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.85)', marginBottom: 2 }}>{job.company_name}</p>
           <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.55)', marginBottom: 8 }}>{[job.city && `📍 ${job.city}${job.state ? ', ' + job.state : ''}`, job.work_mode].filter(Boolean).join(' · ')}</p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)' }}>{job.applicants_count || 0} applicants · {timeAgo(job.posted_at || job.posted_datetime)}</span>
+            <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)' }}>{job.applicants_count || 0} applicants · {timeAgoPosted(jobPostedAt(job))}</span>
             <button onClick={(e) => { e.stopPropagation(); navigate(`/jobs/${job.job_id}`, { state: { job } }); }} style={{ ...S.applyBtn, background: isApplied ? '#057642' : '#0a66c2', color: '#fff', border: isApplied ? '1.5px solid #057642' : '1.5px solid #0a66c2' }}>{isApplied ? '✓ Applied' : 'Apply'}</button>
           </div>
         </div>

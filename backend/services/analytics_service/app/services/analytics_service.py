@@ -77,7 +77,10 @@ class AnalyticsService:
         if cached:
             return success(cached, trc, {'cache': 'hit'})
         metric = payload.get('metric', 'applications')
-        rows = self.rollups.top_jobs(metric, payload.get('limit', 10))
+        sort = (payload.get('sort') or 'desc').lower()
+        if sort not in {'asc', 'desc'}:
+            sort = 'desc'
+        rows = self.rollups.top_jobs(metric, int(payload.get('limit', 10)), sort)
         items = []
         for row in rows:
             if not row.get('job_id'):

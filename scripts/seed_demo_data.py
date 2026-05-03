@@ -31,13 +31,45 @@ def get_data(resp):
     return resp.get("data", resp)
 
 
+def wait_job_ready(job_id, headers_member, timeout=90):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = requests.post(
+            f"{BASE['jobs']}/jobs/get",
+            json={"job_id": job_id},
+            headers=headers_member,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            return
+        time.sleep(1)
+    raise RuntimeError(f"Timed out waiting for job {job_id} to be readable (Kafka consumer may be slow).")
+
+
+def first_job_id_from_search(headers_recruiter):
+    r = requests.post(
+        f"{BASE['jobs']}/jobs/search",
+        json={"keyword": "Backend", "page": 1, "page_size": 20},
+        headers=headers_recruiter,
+        timeout=15,
+    )
+    data = r.json() if r.ok else {}
+    items = (data.get("data") or {}).get("items") or []
+    for row in items:
+        jid = row.get("job_id")
+        if jid:
+            return jid
+    return None
+
+
 def main():
     print('Registering demo users...')
     post('auth', '/auth/register', {
         'email': 'ava@example.com', 'password': 'StrongPass#1', 'user_type': 'member', 'first_name': 'Ava', 'last_name': 'Shah'
     }, allow_conflict=True)
     post('auth', '/auth/register', {
-        'email': 'recruiter@example.com', 'password': 'RecruiterPass#1', 'user_type': 'recruiter', 'first_name': 'Morgan', 'last_name': 'Lee'
+        'email': 'recruiter@example.com', 'password': 'RecruiterPass#1', 'user_type': 'recruiter',
+        'first_name': 'Morgan', 'last_name': 'Lee', 'company_name': 'Northstar Labs',
     }, allow_conflict=True)
 
     print('Logging in...')
@@ -78,6 +110,7 @@ def main():
     print('Creating jobs...')
     created_job_ids = []
     for i in range(1, 11):
+        base = 105_000 + i * 3_000
         resp = post('jobs', '/jobs/create', {
             'company_id': company_id,
             'recruiter_id': recruiter_id,
@@ -87,12 +120,24 @@ def main():
             'employment_type': 'full_time',
             'location': 'San Jose, CA',
             'work_mode': 'hybrid',
-            'skills_required': ['Python', 'Kafka', 'MySQL']
+            'skills_required': ['Python', 'Kafka', 'MySQL'],
+            'salary_min': base,
+            'salary_max': base + 28_000,
+            'salary_currency': 'USD',
         }, HEADERS_RECRUITER, allow_conflict=True)
         job_id = get_data(resp).get('job_id') if isinstance(resp, dict) else None
         if job_id:
             created_job_ids.append(job_id)
-    first_job_id = created_job_ids[0] if created_job_ids else 'job_3301'
+    first_job_id = created_job_ids[0] if created_job_ids else None
+    if not first_job_id:
+        first_job_id = first_job_id_from_search(HEADERS_RECRUITER)
+    if not first_job_id:
+        raise RuntimeError(
+            'No job_id from /jobs/create and /jobs/search returned no jobs. '
+            'Wait for the jobs worker to materialize rows, or clear duplicate titles and retry.'
+        )
+
+    wait_job_ready(first_job_id, HEADERS_MEMBER)
 
     print('Submitting application...')
     post('applications', '/applications/submit', {

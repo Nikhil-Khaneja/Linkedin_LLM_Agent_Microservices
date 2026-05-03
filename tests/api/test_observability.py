@@ -1,14 +1,24 @@
+import uuid
+
 
 def test_ops_endpoints_and_cache_stats(clients):
-    o4 = clients['owner4']
+    o2, o3, o4 = clients['owner2'], clients['owner3'], clients['owner4']
     o6 = clients['owner6']
     MEMBER = clients['headers']['member']
     RECRUITER = clients['headers']['recruiter']
+    o3.post('/recruiters/create', headers=RECRUITER, json={
+        'recruiter_id': 'rec_120', 'name': 'Morgan Lee', 'email': 'recruiter@example.com',
+        'company_name': 'Northstar Labs', 'company_industry': 'Software', 'company_size': 'medium', 'access_level': 'admin',
+    })
+    o2.post('/members/create', headers=MEMBER, json={
+        'member_id': 'mem_501', 'first_name': 'Ava', 'last_name': 'Shah', 'email': 'ava@example.com',
+        'headline': 'Data Analyst', 'skills': ['SQL', 'Python', 'FastAPI'], 'location': 'San Jose, CA',
+    })
 
     create = o4.post('/jobs/create', headers=RECRUITER, json={
         'company_id': 'cmp_44',
         'recruiter_id': 'rec_120',
-        'title': 'Observability Engineer',
+        'title': f'Observability Engineer {uuid.uuid4().hex[:8]}',
         'description': 'Build tracing, metrics, and event driven systems for recruiter workflows.',
         'seniority_level': 'mid',
         'employment_type': 'full_time',

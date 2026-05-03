@@ -104,7 +104,7 @@ export default function Layout() {
       try {
         const [jobsRes, membersRes] = await Promise.allSettled([
           axios.post(`${BASE.job}/jobs/search`,       { keyword:val, page_size:5 }, authCfg),
-          axios.post(`${BASE.member}/members/search`, { keyword:val, page_size:3 }, authCfg),
+          axios.post(`${BASE.member}/members/search`, { keyword:val, page_size:3, media_public_base: BASE.member }, authCfg),
         ]);
         const jobs    = jobsRes.status    === 'fulfilled' ? jobsRes.value.data.data?.items || [] : [];
         const memberItems = membersRes.status === 'fulfilled' ? membersRes.value.data.data?.items || [] : [];
@@ -128,6 +128,7 @@ export default function Layout() {
     { to:'/',            label:'Home',      icon:<HomeIcon /> },
     { to:'/jobs',        label:'Jobs',      icon:<JobIcon /> },
     { to:'/applications',label:'My Jobs',   icon:<BriefIcon /> },
+    { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
     { to:'/connections', label:'Network',   icon:<NetIcon /> },
     { to:'/messages',    label:'Messaging', icon:<MsgIcon /> },
   ];

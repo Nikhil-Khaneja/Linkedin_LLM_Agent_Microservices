@@ -45,6 +45,9 @@ Thumbs.db
 # MinIO local data
 minio_data/
 
+# Kaggle CSV/zips (large local downloads)
+data/kaggle_download/
+
 # JMeter results (raw)
 tests/jmeter/*.jtl
 tests/jmeter/results/

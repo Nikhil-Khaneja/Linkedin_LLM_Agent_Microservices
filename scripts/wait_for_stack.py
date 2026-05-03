@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+import os
 import subprocess
 import sys
 import time
 
 SERVICES = sys.argv[1:]
-TIMEOUT = 300
+# First `npm install` + CRA boot often exceeds 300s on a cold machine. Override with WAIT_FOR_STACK_TIMEOUT.
+_default = 900 if "frontend" in SERVICES else 300
+TIMEOUT = int(os.environ.get("WAIT_FOR_STACK_TIMEOUT", str(_default)))
 
 if not SERVICES:
     print("Usage: wait_for_stack.py <service> [<service> ...]", file=sys.stderr)

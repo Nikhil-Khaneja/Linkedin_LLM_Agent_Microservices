@@ -1,9 +1,26 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from 'recharts';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
+
+const PIE_COLORS = ['#0a66c2', '#057642', '#7c3aed', '#e68a00', '#cc1016', '#06b6d4', '#ec4899', '#64748b'];
 
 const blankExperience = () => ({
   title: '',
@@ -72,6 +89,7 @@ export default function ProfilePage() {
   const [requestSent, setRequestSent] = useState(false);
   const [sentRequestId, setSentRequestId] = useState('');
   const [analytics, setAnalytics] = useState(null);
+  const profileViewIngestInFlight = useRef(false);
 
   const isOwnProfile = !memberId || viewedId === currentId;
   const isMemberProfile = profileType === 'member';
@@ -81,6 +99,27 @@ export default function ProfilePage() {
     if (profileType === 'recruiter') return profile.name || profile.recruiter_id || '';
     return `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.email || profile.member_id || '';
   }, [profile, profileType]);
+
+  const profileViewsChartData = useMemo(() => {
+    const rows = analytics?.profile_views || [];
+    const byDate = new Map();
+    for (const entry of rows) {
+      const raw = String(entry.view_date || entry.date || '');
+      const date = raw.length >= 10 ? raw.slice(5, 10) : raw.slice(0, 10) || raw;
+      if (!date) continue;
+      const n = Number(entry.view_count ?? entry.count ?? 0);
+      byDate.set(date, (byDate.get(date) || 0) + n);
+    }
+    return Array.from(byDate.entries()).map(([date, views]) => ({ date, views }));
+  }, [analytics]);
+
+  const appStatusPieData = useMemo(() => {
+    const b = analytics?.application_status_breakdown || {};
+    return Object.entries(b).map(([name, value]) => ({
+      name: String(name).replace(/_/g, ' '),
+      value: Number(value || 0),
+    })).filter((d) => d.value > 0);
+  }, [analytics]);
 
   useEffect(() => {
     if (!viewedId || !token) return;
@@ -93,7 +132,39 @@ export default function ProfilePage() {
       return;
     }
     loadAnalytics();
-  }, [viewedId, token, isMemberProfile]);
+  }, [viewedId, token, isMemberProfile, isOwnProfile]);
+
+  useEffect(() => {
+    if (!isOwnProfile || !currentId || !profile?.profile_photo_url) return;
+    try {
+      localStorage.setItem(`photo_${currentId}`, profile.profile_photo_url);
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [isOwnProfile, currentId, profile?.profile_photo_url]);
+
+  useEffect(() => {
+    if (!token || isOwnProfile || !isMemberProfile || !profile?.member_id || !currentId) return;
+    const targetId = profile.member_id;
+    if (profileViewIngestInFlight.current) return;
+    profileViewIngestInFlight.current = true;
+    axios
+      .post(
+        `${BASE.analytics}/events/ingest`,
+        {
+          event_type: 'profile.viewed',
+          actor_id: currentId,
+          entity: { entity_type: 'member', entity_id: targetId },
+          payload: {},
+          idempotency_key: `ui:profile.viewed:${currentId}:${targetId}`,
+        },
+        token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+      )
+      .catch(() => {})
+      .finally(() => {
+        profileViewIngestInFlight.current = false;
+      });
+  }, [token, isOwnProfile, isMemberProfile, profile?.member_id, currentId]);
 
   useEffect(() => {
     if (isOwnProfile || !currentId || !viewedId || !token) return;
@@ -101,13 +172,18 @@ export default function ProfilePage() {
   }, [isOwnProfile, currentId, viewedId, token, profileType]);
 
   const hydrateMemberForm = (p) => {
-    const experience = Array.isArray(p?.experience) && p.experience.length ? p.experience : [blankExperience()];
+    const rt = (p?.resume_text || '').trim();
+    const experience = Array.isArray(p?.experience) && p.experience.length ? p.experience.map((x) => ({ ...x })) : [blankExperience()];
+    let about_summary = p?.about_summary || '';
+    if (rt && !String(about_summary).trim()) {
+      about_summary = rt.slice(0, 5000);
+    }
     const education = Array.isArray(p?.education) && p.education.length ? p.education : [blankEducation()];
     setForm({
       first_name: p?.first_name || '',
       last_name: p?.last_name || '',
       headline: p?.headline || '',
-      about_summary: p?.about_summary || '',
+      about_summary,
       city: p?.city || '',
       state: p?.state || '',
       skillsText: Array.isArray(p?.skills) ? p.skills.join(', ') : '',
@@ -120,7 +196,7 @@ export default function ProfilePage() {
     setLoading(true);
     try {
       try {
-        const { data } = await axios.post(`${BASE.member}/members/get`, { member_id: viewedId }, authCfg);
+        const { data } = await axios.post(`${BASE.member}/members/get`, { member_id: viewedId, media_public_base: BASE.member }, authCfg);
         const p = data?.data?.profile || null;
         setProfileType('member');
         setProfile(p);
@@ -179,7 +255,10 @@ export default function ProfilePage() {
 
   const waitForUpload = async (uploadId) => {
     for (let i = 0; i < 30; i += 1) {
-      const { data } = await axios.get(`${BASE.member}/members/upload-status/${uploadId}`, authCfg);
+      const { data } = await axios.get(`${BASE.member}/members/upload-status/${uploadId}`, {
+        ...authCfg,
+        params: { media_public_base: BASE.member },
+      });
       const item = data?.data || {};
       if (item.status === 'completed') return item;
       if (item.status === 'failed') throw new Error(item.error || 'Upload failed');
@@ -230,7 +309,7 @@ export default function ProfilePage() {
       fd.append('media_type', mediaType);
       fd.append('file', file);
       const { data } = await axios.post(`${BASE.member}/members/upload-media`, fd, {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+        headers: { Authorization: `Bearer ${token}` },
       });
       const uploadId = data?.data?.upload_id;
       const item = uploadId ? await waitForUpload(uploadId) : null;
@@ -238,10 +317,30 @@ export default function ProfilePage() {
       if (next) {
         setProfile(next);
         if (isMemberProfile) hydrateMemberForm(next);
+        if (mediaType === 'profile_photo' && currentId && next.profile_photo_url) {
+          try {
+            localStorage.setItem(`photo_${currentId}`, next.profile_photo_url);
+          } catch {
+            /* ignore */
+          }
+        }
       } else {
         await loadProfile();
       }
-      toast.success(mediaType === 'resume' ? 'Resume uploaded and parsed' : 'Profile photo uploaded');
+      if (mediaType === 'resume') {
+        if (next) {
+          const rt = String(next.resume_text || '').trim();
+          if (rt) {
+            toast.success('Resume uploaded; extracted text is saved to About / Experience when those were empty.');
+          } else {
+            toast('Resume file saved, but no text was extracted. Try a .txt file or a text-based PDF (not a scan).', { icon: '⚠️' });
+          }
+        } else {
+          toast.success('Resume upload finished.');
+        }
+      } else {
+        toast.success('Profile photo uploaded');
+      }
     } catch (err) {
       toast.error(err?.message || err.response?.data?.error?.message || 'Upload failed');
     } finally {
@@ -349,8 +448,8 @@ export default function ProfilePage() {
                   <input type="file" accept="image/*" onChange={(e) => uploadMedia('profile_photo', e.target.files?.[0])} style={{ display: 'none' }} />
                 </label>
                 <label style={S.secondaryBtn}>
-                  {uploadingResume ? 'Uploading resume…' : 'Upload resume (PDF/TXT)'}
-                  <input type="file" accept=".pdf,.txt" onChange={(e) => uploadMedia('resume', e.target.files?.[0])} style={{ display: 'none' }} />
+                  {uploadingResume ? 'Uploading resume…' : 'Upload resume (PDF / TXT / DOCX)'}
+                  <input type="file" accept=".pdf,.txt,.docx,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(e) => uploadMedia('resume', e.target.files?.[0])} style={{ display: 'none' }} />
                 </label>
                 <button onClick={saveProfile} disabled={saving} style={S.primaryBtn}>{saving ? 'Saving…' : 'Save profile'}</button>
               </div>
@@ -483,35 +582,75 @@ export default function ProfilePage() {
           <h3 style={S.sectionTitle}>{isOwnProfile ? 'Profile insights' : 'Public profile'}</h3>
           {isOwnProfile ? (
             <>
+              {isMemberProfile && (
+                <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.55)', marginBottom: 12, lineHeight: 1.45 }}>
+                  Quick stats here; open <Link to="/analytics" style={{ color: '#0a66c2', fontWeight: 700 }}>Analytics</Link> in the top bar for the full dashboard.
+                </p>
+              )}
               <div style={S.statRow}><span>Total profile views</span><strong>{analytics?.total_profile_views ?? profile.profile_views ?? 0}</strong></div>
+              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.48)', marginTop: 6, lineHeight: 1.45 }}>
+                Totals sum <strong>per day</strong> (two people viewing you the same day, or opening your profile twice after data loads, can show as <strong>2</strong> for that day).
+              </p>
               <div style={S.statRow}><span>Connections</span><strong>{profile.connections_count || 0}</strong></div>
               <div style={S.statRow}><span>Applications tracked</span><strong>{analytics?.status_total ?? 0}</strong></div>
               {resumeUrl && <div style={{ marginTop: 14 }}><a href={resumeUrl} target="_blank" rel="noreferrer" style={{ ...S.secondaryBtn, display: 'inline-block', textDecoration: 'none' }}>View resume</a></div>}
               {profile?.resume_text && <p style={{ marginTop: 12, fontSize: 13, color: 'rgba(0,0,0,0.55)' }}>Parsed resume text ready for AI ranking.</p>}
-              {analytics?.profile_views?.length > 0 && (
+              {profileViewsChartData.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'rgba(0,0,0,0.65)' }}>Profile views (daily)</p>
+                  {profileViewsChartData.length < 2 ? (
+                    <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)', marginBottom: 10 }}>
+                      With only one day of data, a line chart has nothing to connect—using a bar instead.
+                    </p>
+                  ) : null}
+                  <ResponsiveContainer width="100%" height={200}>
+                    {profileViewsChartData.length >= 2 ? (
+                      <LineChart data={profileViewsChartData} margin={{ top: 6, right: 8, left: 0, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis allowDecimals={false} width={36} />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="views" stroke="#0a66c2" strokeWidth={2} dot={{ r: 4 }} />
+                      </LineChart>
+                    ) : (
+                      <BarChart data={profileViewsChartData} margin={{ top: 8, right: 8, left: 0, bottom: 24 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis allowDecimals={false} width={36} />
+                        <Tooltip />
+                        <Bar dataKey="views" fill="#0a66c2" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                      </BarChart>
+                    )}
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {analytics?.profile_views?.length > 0 && profileViewsChartData.length === 0 && (
                 <div style={{ marginTop: 14 }}>
                   <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'rgba(0,0,0,0.65)' }}>Recent profile views</p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {analytics.profile_views.slice(-5).reverse().map((entry) => (
-                      <div key={entry.date} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'rgba(0,0,0,0.65)' }}>
-                        <span>{entry.date}</span>
-                        <strong>{entry.count}</strong>
+                      <div key={entry.date || entry.view_date} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'rgba(0,0,0,0.65)' }}>
+                        <span>{entry.view_date || entry.date}</span>
+                        <strong>{entry.view_count ?? entry.count}</strong>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              {analytics?.application_status_breakdown && Object.keys(analytics.application_status_breakdown).length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'rgba(0,0,0,0.65)' }}>Application status summary</p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {Object.entries(analytics.application_status_breakdown).map(([status, count]) => (
-                      <div key={status} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'rgba(0,0,0,0.65)' }}>
-                        <span style={{ textTransform: 'capitalize' }}>{status.replace(/_/g, ' ')}</span>
-                        <strong>{count}</strong>
-                      </div>
-                    ))}
-                  </div>
+              {appStatusPieData.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'rgba(0,0,0,0.65)' }}>Applications by status</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie dataKey="value" data={appStatusPieData} nameKey="name" cx="50%" cy="50%" outerRadius={72} label>
+                        {appStatusPieData.map((_, i) => (
+                          <Cell key={String(i)} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
               )}
               <Link to="/notifications" style={{ ...S.secondaryBtn, display: 'inline-block', marginTop: 12, textDecoration: 'none' }}>View notifications</Link>

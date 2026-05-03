@@ -1,4 +1,5 @@
 import time
+import uuid
 
 
 def test_full_system_flow(clients):
@@ -37,15 +38,23 @@ def test_full_system_flow(clients):
     assert o2.post('/members/search', headers=RECRUITER, json={'skill': 'Python', 'page': 1, 'page_size': 10}).status_code == 200
 
     r = o4.post('/jobs/create', headers=RECRUITER, json={
-        'company_id': 'cmp_44', 'recruiter_id': 'rec_120', 'title': 'Backend Engineer',
+        'company_id': 'cmp_44', 'recruiter_id': 'rec_120', 'title': f'Backend Engineer {uuid.uuid4().hex[:8]}',
         'description': 'Build Kafka-backed services and optimize data access patterns in a LinkedIn-style product.',
         'seniority_level': 'mid', 'employment_type': 'full_time', 'location': 'San Jose, CA', 'work_mode': 'hybrid',
         'skills_required': ['Python', 'Kafka', 'MySQL']
     })
     assert r.status_code == 200
     job_id = r.json()['data']['job_id']
+    committed = False
+    for _ in range(120):
+        g = o4.post('/jobs/get', headers=member_runtime_headers, json={'job_id': job_id})
+        if g.status_code == 200 and (g.json().get('meta') or {}).get('write_state') == 'committed':
+            committed = True
+            break
+        time.sleep(0.05)
+    assert committed, 'job not committed before apply (applications reads MySQL)'
     assert o4.post('/jobs/get', headers=member_runtime_headers, json={'job_id': job_id}).status_code == 200
-    assert o4.post('/jobs/search', headers=member_runtime_headers, json={'keyword': 'Backend', 'page': 1, 'page_size': 10}).status_code == 200
+    assert o4.post('/jobs/search', headers=member_runtime_headers, json={'keyword': 'Engineer', 'page': 1, 'page_size': 10}).status_code == 200
 
     r = o5.post('/applications/submit', headers=member_runtime_headers, json={
         'job_id': job_id, 'member_id': 'mem_501', 'resume_ref': 'resume-501.pdf', 'cover_letter': 'Excited to apply.',
@@ -53,7 +62,15 @@ def test_full_system_flow(clients):
     })
     assert r.status_code == 200
     app_id = r.json()['data']['application_id']
-    assert o5.post('/applications/get', headers=member_runtime_headers, json={'application_id': app_id}).status_code == 200
+    got = None
+    for _ in range(120):
+        o5.post('/applications/get', headers=member_runtime_headers, json={'application_id': app_id})
+        o7.post('/analytics/funnel', headers=RECRUITER, json={'job_id': job_id})
+        got = o5.post('/applications/get', headers=member_runtime_headers, json={'application_id': app_id})
+        if got.status_code == 200:
+            break
+        time.sleep(0.05)
+    assert got.status_code == 200
     assert o5.post('/applications/byMember', headers=member_runtime_headers, json={'member_id': 'mem_501'}).status_code == 200
     assert o5.post('/applications/byJob', headers=RECRUITER, json={'job_id': job_id}).status_code == 200
     assert o5.post('/applications/updateStatus', headers=RECRUITER, json={'application_id': app_id, 'recruiter_id': 'rec_120', 'new_status': 'reviewing'}).status_code == 200
@@ -89,10 +106,10 @@ def test_full_system_flow(clients):
         res = o8.get(f'/ai/tasks/{task_id}', headers=RECRUITER)
         assert res.status_code == 200
         status = res.json()['data']['status']
-        if status == 'waiting_for_approval':
+        if status == 'awaiting_approval':
             break
         time.sleep(0.25)
-    assert status == 'waiting_for_approval'
+    assert status == 'awaiting_approval'
     approve = o8.post(f'/ai/tasks/{task_id}/approve', headers=RECRUITER, json={'edits': 'Hi Ava, your profile looks strong for this role.'})
     assert approve.status_code == 200
     final_task = o8.get(f'/ai/tasks/{task_id}', headers=RECRUITER)

@@ -19,6 +19,22 @@ def extract_text_from_bytes(filename: str | None, content: bytes | None, content
     filename = (filename or '').lower()
     content_type = (content_type or '').lower()
 
+    if filename.endswith('.docx') or 'wordprocessingml' in content_type or 'officedocument' in content_type:
+        try:
+            from docx import Document
+
+            doc = Document(BytesIO(content))
+            parts = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        t = (cell.text or '').strip()
+                        if t:
+                            parts.append(t)
+            return _normalize_text('\n'.join(parts))
+        except Exception:
+            pass
+
     if filename.endswith('.pdf') or 'pdf' in content_type:
         try:
             from pypdf import PdfReader

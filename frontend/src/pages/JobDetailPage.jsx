@@ -4,6 +4,7 @@ import axios from 'axios';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+import { formatPostedCalendar } from '../utils/timeAgo';
 
 function newApplyKey(userId, jobId) {
   const rand = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -58,6 +59,24 @@ export default function JobDetailPage() {
   }, [jobId, user?.principalId, user?.userId]);
 
   useEffect(() => {
+    const tok = localStorage.getItem('access_token');
+    if (!job?.job_id || !tok) return;
+    const viewerId = user?.principalId || user?.userId || 'anonymous';
+    const idem = `ui:job.viewed:${viewerId}:${job.job_id}`;
+    axios.post(
+      `${BASE.analytics}/events/ingest`,
+      {
+        event_type: 'job.viewed',
+        actor_id: viewerId,
+        entity: { entity_type: 'job', entity_id: job.job_id },
+        payload: { job_id: job.job_id },
+        idempotency_key: idem,
+      },
+      { headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' } },
+    ).catch(() => {});
+  }, [job?.job_id, user?.principalId, user?.userId]);
+
+  useEffect(() => {
     const checkApplied = async () => {
       if (!user?.principalId) return;
       try {
@@ -98,6 +117,7 @@ export default function JobDetailPage() {
     for (let i = 0; i < 30; i += 1) {
       const { data } = await axios.get(`${BASE.member}/members/upload-status/${uploadId}`, {
         headers: { Authorization: 'Bearer ' + localStorage.getItem('access_token') },
+        params: { media_public_base: BASE.member },
       });
       const item = data?.data || {};
       if (item.status === 'completed') return item;
@@ -105,6 +125,21 @@ export default function JobDetailPage() {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     throw new Error('Resume upload is still processing. Please retry in a moment.');
+  };
+
+  const waitForApplicationRow = async (applicationId, maxMs = 25000) => {
+    const auth = { headers: { Authorization: 'Bearer ' + localStorage.getItem('access_token') } };
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      try {
+        const { data } = await axios.post(`${BASE.application}/applications/get`, { application_id: applicationId }, auth);
+        if (data?.success && data?.data?.application) return true;
+      } catch {
+        /* not persisted yet */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return false;
   };
 
   const markApplyStarted = async () => {
@@ -153,7 +188,6 @@ export default function JobDetailPage() {
         const uploadRes = await axios.post(`${BASE.member}/members/upload-media`, fd, {
           headers: {
             Authorization: 'Bearer ' + localStorage.getItem('access_token'),
-            'Content-Type': 'multipart/form-data',
           },
         });
         const uploadId = uploadRes.data?.data?.upload_id;
@@ -164,13 +198,24 @@ export default function JobDetailPage() {
           setResumeText(uploadItem.extracted_text);
         }
       }
-      await axios.post(`${BASE.application}/applications/submit`, {
+      const submitRes = await axios.post(`${BASE.application}/applications/submit`, {
         job_id: jobId,
         cover_letter: coverLetter,
         resume_ref: resumeRef,
         resume_text: finalResumeText || undefined,
         idempotency_key: applyKeyRef.current,
       });
+      const submitBody = submitRes.data;
+      if (submitBody?.meta?.async && submitBody?.data?.application_id) {
+        const waitId = toast.loading('Saving your application…');
+        const ok = await waitForApplicationRow(submitBody.data.application_id);
+        toast.dismiss(waitId);
+        if (!ok) {
+          toast.error('Application is still processing. Check My Jobs in a moment.');
+          applyKeyRef.current = newApplyKey(user?.principalId || user?.userId, jobId);
+          return;
+        }
+      }
       setHasApplied(true);
       setShowModal(false);
       window.dispatchEvent(new CustomEvent('applications:changed', { detail: { jobId } }));
@@ -235,7 +280,16 @@ export default function JobDetailPage() {
           <Detail icon="💼" label="Job type" value={job.employment_type?.replace('_',' ')} />
           <Detail icon="🏢" label="Work mode" value={job.work_mode} />
           <Detail icon="📊" label="Seniority level" value={job.seniority_level} />
-          <Detail icon="📅" label="Posted" value={new Date(job.posted_at || job.created_at || Date.now()).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})} />
+          {(job.salary_min != null || job.salary_max != null) ? (
+            <Detail
+              icon="💵"
+              label="Salary range"
+              value={`$${job.salary_min != null ? Number(job.salary_min).toLocaleString() : '?'} – $${job.salary_max != null ? Number(job.salary_max).toLocaleString() : '?'} ${job.salary_currency || 'USD'}`}
+            />
+          ) : (
+            <Detail icon="💵" label="Salary range" value="Not specified by employer" />
+          )}
+          <Detail icon="📅" label="Posted" value={formatPostedCalendar(job)} />
           {user?.userType === 'member' && job.status === 'open' && !hasApplied && <button onClick={() => { markApplyStarted(); setShowModal(true); }} style={{ ...S.applyBtn, width:'100%', marginTop:16, borderRadius:4 }}>Apply now</button>}
         </div>
       </aside>

@@ -6,13 +6,23 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, Form, Header, UploadFile
+import mimetypes
+
+from fastapi import APIRouter, Body, File, Form, Header, Query, UploadFile
+from fastapi.responses import Response, StreamingResponse
 from pymongo import MongoClient
 
 from services.shared.common import success, fail, trace_id, require_auth, build_event
 from services.shared.kafka_bus import publish_event
 from services.shared.cache import get_json, set_json
 from services.shared.relational import fetch_one, fetch_all, execute
+from services.shared.media_signed_url import (
+    default_member_public_url,
+    member_media_proxy_url,
+    sanitize_media_public_base,
+    verify_media_params,
+)
+from services.shared.storage import MINIO_BUCKET_PROFILE, MINIO_BUCKET_RESUME, client as minio_client
 from services.member_profile_service.app.services.media_upload_service import get_media_upload_service
 from services.shared.notifications import create_notification
 from services.shared.resume_parser import extract_text_from_bytes
@@ -121,7 +131,14 @@ def _shape_profile_preview(member_id: str, row, merged_payload: dict, location_t
     }
     return profile
 
-def _member_to_profile(row):
+def _resolve_media_public_base(payload: dict | None) -> str:
+    if not payload:
+        return default_member_public_url()
+    raw = sanitize_media_public_base(payload.get("media_public_base"))
+    return raw or default_member_public_url()
+
+
+def _member_to_profile(row, media_public_base: str | None = None):
     if not row:
         return None
     payload = _parse_payload(row.get("payload_json"))
@@ -135,6 +152,24 @@ def _member_to_profile(row):
             state = parts[1] if len(parts) > 1 else state
     experience = _json_list(row.get('experience_json')) or _safe_list(payload.get("experience", []))
     current_company, current_title = _derive_current_experience(experience)
+    photo_url = row.get("profile_photo_url") or payload.get("profile_photo_url") or ""
+    photo_obj = (payload.get("profile_photo_object") or "").strip()
+    photo_bucket = (payload.get("profile_photo_bucket") or MINIO_BUCKET_PROFILE).strip()
+    base = (media_public_base or default_member_public_url()).strip().rstrip("/") or default_member_public_url()
+    mid = row.get("member_id") or ""
+    if photo_obj:
+        try:
+            photo_url = member_media_proxy_url(base, mid, photo_bucket, photo_obj, ttl_seconds=3600)
+        except Exception:
+            photo_url = row.get("profile_photo_url") or payload.get("profile_photo_url") or ""
+    resume_url = row.get("resume_url") or payload.get("resume_url") or ""
+    resume_obj = (payload.get("resume_object") or "").strip()
+    resume_bucket = (payload.get("resume_bucket") or MINIO_BUCKET_RESUME).strip()
+    if resume_obj:
+        try:
+            resume_url = member_media_proxy_url(base, mid, resume_bucket, resume_obj, ttl_seconds=3600)
+        except Exception:
+            resume_url = row.get("resume_url") or payload.get("resume_url") or ""
     return {
         "member_id": row.get("member_id"),
         "email": row.get("email"),
@@ -148,8 +183,8 @@ def _member_to_profile(row):
         "skills": _json_list(row.get('skills_json')) or _safe_list(payload.get("skills", [])),
         "experience": experience,
         "education": _json_list(row.get('education_json')) or _safe_list(payload.get("education", [])),
-        "profile_photo_url": row.get("profile_photo_url") or payload.get("profile_photo_url"),
-        "resume_url": row.get("resume_url") or payload.get("resume_url"),
+        "profile_photo_url": photo_url,
+        "resume_url": resume_url,
         "resume_text": row.get("resume_text") or payload.get("resume_text") or "",
         "current_company": row.get("current_company") or payload.get("current_company") or current_company,
         "current_title": row.get("current_title") or payload.get("current_title") or current_title,
@@ -200,6 +235,44 @@ def _create_notification(member_id: str, actor_id: str):
         target_url=target_url,
         data={'member_id': member_id, 'viewer_id': actor_id},
     )
+
+
+@router.get("/members/media")
+async def stream_member_media(
+    member_id: str = Query(...),
+    bucket: str = Query(...),
+    object_name: str = Query(..., alias="object"),
+    e: int = Query(...),
+    s: str = Query(...),
+):
+    """Stream profile (or other member) media from MinIO using a signed URL (browser-safe, no presigned host mismatch)."""
+    if not verify_media_params(member_id, bucket, object_name, e, s):
+        return Response(status_code=403, content="Invalid or expired media link.")
+    try:
+        obj = minio_client().get_object(bucket, object_name)
+    except Exception:
+        return Response(status_code=404, content="Object not found.")
+
+    media_type = mimetypes.guess_type(object_name)[0] or "application/octet-stream"
+
+    def body():
+        try:
+            while True:
+                chunk = obj.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                obj.close()
+            except Exception:
+                pass
+            try:
+                obj.release_conn()
+            except Exception:
+                pass
+
+    return StreamingResponse(body(), media_type=media_type)
 
 
 def _merge_profile_payload(existing_payload: dict, incoming: dict) -> tuple[dict, str, str]:
@@ -277,7 +350,7 @@ async def create_member(payload: dict = Body(...), authorization: str | None = H
         },
     )
     row = fetch_one("SELECT * FROM members WHERE member_id=:member_id", {"member_id": member_id})
-    profile = _member_to_profile(row)
+    profile = _member_to_profile(row, _resolve_media_public_base(payload))
     if actor.get("role") != "admin" and actor.get("actor_id") != member_id and profile:
         profile.pop("profile_views", None)
     return success({"profile": profile}, trc)
@@ -292,6 +365,7 @@ async def get_member(payload: dict = Body(...), authorization: str | None = Head
         return fail("auth_required", "Bearer token is missing or invalid.", trc, status_code=401)
 
     member_id = payload.get("member_id") or actor["actor_id"]
+    media_base = _resolve_media_public_base(payload)
     pending = get_json(_pending_member_update_key(member_id)) if actor.get("actor_id") == member_id or actor.get("role") == 'admin' else None
     if pending and isinstance(pending, dict) and pending.get('profile'):
         profile = dict(pending.get('profile') or {})
@@ -320,7 +394,7 @@ async def get_member(payload: dict = Body(...), authorization: str | None = Head
             pass
         row = fetch_one("SELECT * FROM members WHERE member_id=:member_id", {"member_id": member_id})
 
-    profile = _member_to_profile(row)
+    profile = _member_to_profile(row, media_base)
     if actor.get("role") != "admin" and actor.get("actor_id") != member_id and profile:
         profile.pop("profile_views", None)
     return success({"profile": profile}, trc)
@@ -375,8 +449,19 @@ async def search_members(payload: dict = Body(...), authorization: str | None = 
     if actor["role"] not in {"member", "recruiter", "admin"}:
         return fail("forbidden", "You are not allowed to search members.", trc, status_code=403)
 
+    media_base = _resolve_media_public_base(payload)
     keyword = (payload.get("keyword") or "").strip().lower()
-    limit = int(payload.get("page_size") or 12)
+    try:
+        limit = int(payload.get("page_size") or 12)
+    except (TypeError, ValueError):
+        limit = 12
+    limit = max(1, min(limit, 5000))
+    try:
+        page = int(payload.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    page = max(1, page)
+    offset = (page - 1) * limit
 
     if keyword:
         like = f"%{keyword}%"
@@ -397,9 +482,9 @@ async def search_members(payload: dict = Body(...), authorization: str | None = 
                 lower(COALESCE(payload_json, '')) LIKE :like
               )
             ORDER BY first_name ASC, last_name ASC
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
             """,
-            {"self_id": actor["actor_id"], "like": like, "limit": limit},
+            {"self_id": actor["actor_id"], "like": like, "limit": limit, "offset": offset},
         )
     else:
         rows = fetch_all(
@@ -407,12 +492,16 @@ async def search_members(payload: dict = Body(...), authorization: str | None = 
             SELECT * FROM members
             WHERE is_deleted = 0 AND member_id <> :self_id
             ORDER BY first_name ASC, last_name ASC
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
             """,
-            {"self_id": actor["actor_id"], "limit": limit},
+            {"self_id": actor["actor_id"], "limit": limit, "offset": offset},
         )
 
-    return success({"items": [_member_to_profile(r) for r in rows]}, trc)
+    return success(
+        {"items": [_member_to_profile(r, media_base) for r in rows]},
+        trc,
+        {"page": page, "page_size": limit, "offset": offset},
+    )
 
 
 @router.post("/members/upload-media")
@@ -454,7 +543,12 @@ async def upload_media(
 
 
 @router.get("/members/upload-status/{upload_id}")
-async def get_upload_status(upload_id: str, authorization: str | None = Header(None), x_trace_id: str | None = Header(None)):
+async def get_upload_status(
+    upload_id: str,
+    authorization: str | None = Header(None),
+    x_trace_id: str | None = Header(None),
+    media_public_base: str | None = Query(None),
+):
     trc = trace_id(x_trace_id)
     try:
         actor = _actor(authorization)
@@ -468,7 +562,8 @@ async def get_upload_status(upload_id: str, authorization: str | None = Header(N
         return fail("forbidden", "You can only view uploads for your own profile.", trc, status_code=403)
 
     row = fetch_one("SELECT * FROM members WHERE member_id=:member_id", {"member_id": upload.get("member_id")})
-    profile = _member_to_profile(row) if row else None
+    base = sanitize_media_public_base(media_public_base) or default_member_public_url()
+    profile = _member_to_profile(row, base) if row else None
     if actor.get("role") != "admin" and actor.get("actor_id") != upload.get("member_id") and profile:
         profile.pop("profile_views", None)
     return success({

@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
 
 cp -n .env.example .env || true
+set -a
+# shellcheck disable=SC1091
+[[ -f .env ]] && source .env
+set +a
 python3 scripts/reset_dev_state.py || true
 
 SERVICES_INFRA=(mysql mongo redis kafka minio prometheus grafana)
@@ -31,7 +37,7 @@ python3 scripts/seed_demo_data.py || true
 
 echo 'Stack ready'
 echo 'Frontend:   http://localhost:5173'
-echo 'Grafana:    http://localhost:3000  (admin/admin)'
+echo "Grafana:    http://localhost:${GRAFANA_PUBLISH_PORT:-3000}  (admin/admin)"
 echo 'Prometheus: http://localhost:9090'
 echo 'Owner 1:    http://localhost:8001/docs'
 echo 'Owner 6:    http://localhost:8006/docs'

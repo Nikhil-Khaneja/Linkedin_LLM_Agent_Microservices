@@ -24,11 +24,17 @@ class AuthService:
         if user['subject_type'] == 'member':
             if email == 'ava@example.com':
                 return 'mem_501'
-            return f"mem_{str(user['user_id']).split('_')[-1]}"
+            uid = user.get('user_id') or ''
+            if isinstance(uid, str) and uid.startswith('mem_'):
+                return uid
+            return f"mem_{str(uid).split('_')[-1]}"
         if user['subject_type'] == 'recruiter':
             if email == 'recruiter@example.com':
                 return 'rec_120'
-            return f"rec_{str(user['user_id']).split('_')[-1]}"
+            uid = user.get('user_id') or ''
+            if isinstance(uid, str) and uid.startswith('rec_'):
+                return uid
+            return f"rec_{str(uid).split('_')[-1]}"
         return user['user_id']
 
     def issue_access_token_for(self, user: dict) -> str:

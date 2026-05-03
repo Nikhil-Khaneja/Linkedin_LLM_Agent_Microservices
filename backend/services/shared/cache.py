@@ -94,17 +94,28 @@ def _record(kind: str, key: str, amount: int = 1) -> None:
 
 
 
+_redis_ping_cache: tuple[float, bool] | None = None
+
+
 def is_redis_enabled() -> bool:
     if CACHE_MODE == 'memory' and not _ALLOW_MEMORY:
         raise RuntimeError('CACHE_MODE=memory is test-only. Use Redis in non-test environments.')
     if CACHE_MODE != 'redis':
         return False
+    global _redis_ping_cache
+    now = time.time()
+    if _redis_ping_cache is not None and (not _ALLOW_MEMORY):
+        age = now - _redis_ping_cache[0]
+        if (_redis_ping_cache[1] and age < 30.0) or ((not _redis_ping_cache[1]) and age < 3.0):
+            return _redis_ping_cache[1]
     try:
         client = _redis_client()
         client.ping()
+        _redis_ping_cache = (now, True)
         return True
     except Exception:
         _record('errors', 'redis:ping')
+        _redis_ping_cache = (now, False)
         return False
 
 

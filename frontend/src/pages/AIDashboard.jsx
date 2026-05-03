@@ -62,8 +62,8 @@ export default function AIDashboard() {
         const recruiterRes = await axios.post(`${BASE.recruiter}/recruiters/get`, {}, authCfg);
         const rid = recruiterRes.data?.data?.recruiter?.recruiter_id;
         const jobsRes = rid
-          ? await axios.post(`${BASE.job}/jobs/byRecruiter`, { recruiter_id: rid }, authCfg)
-          : await axios.post(`${BASE.job}/jobs/search`, { page_size: 50 }, authCfg);
+          ? await axios.post(`${BASE.job}/jobs/byRecruiter`, { recruiter_id: rid, page: 1, page_size: 15 }, authCfg)
+          : await axios.post(`${BASE.job}/jobs/search`, { page: 1, page_size: 15 }, authCfg);
         if (mounted) {
           const items = jobsRes.data?.data?.items || [];
           setJobs(items);
@@ -71,7 +71,7 @@ export default function AIDashboard() {
         }
       } catch {
         try {
-          const jobsRes = await axios.post(`${BASE.job}/jobs/search`, { page_size: 50 }, authCfg);
+          const jobsRes = await axios.post(`${BASE.job}/jobs/search`, { page: 1, page_size: 15 }, authCfg);
           if (mounted) {
             const items = jobsRes.data?.data?.items || [];
             setJobs(items);

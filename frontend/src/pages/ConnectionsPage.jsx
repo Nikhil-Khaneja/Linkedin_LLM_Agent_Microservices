@@ -122,7 +122,7 @@ export default function ConnectionsPage() {
     if (!token) return toast.error('Please sign in first');
     setSearching(true);
     try {
-      const { data } = await axios.post(`${BASE.member}/members/search`, { keyword: searchQuery.trim(), page_size: 12 }, authCfg);
+      const { data } = await axios.post(`${BASE.member}/members/search`, { keyword: searchQuery.trim(), page: 1, page_size: 800, media_public_base: BASE.member }, authCfg);
       const items = data?.data?.items || [];
       setSearchResults(items);
       if (items.filter((m) => m.member_id !== currentId).length === 0) toast('No members found for that search', { icon: '🔍' });
