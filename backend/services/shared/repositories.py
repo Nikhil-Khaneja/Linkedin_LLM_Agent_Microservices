@@ -745,6 +745,9 @@ class AIRepository:
     def list_tasks_for_user(self, user_id: str) -> list[dict[str, Any]]:
         return [self._normalize_task(item) for item in find_many("ai_tasks", {"created_by": user_id}, sort=[("created_at", -1)])]
 
+    def list_all_tasks(self) -> list[dict[str, Any]]:
+        return [self._normalize_task(item) for item in find_many("ai_tasks", {}, sort=[("created_at", -1)])]
+
     def save_task(self, task: dict[str, Any]) -> None:
         task = self._normalize_task(task)
         task["updated_at"] = now_iso()

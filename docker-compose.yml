@@ -478,7 +478,7 @@ services:
   frontend:
     image: node:20
     working_dir: /web
-    command: sh -lc "npm install && PORT=5173 npm start"
+    command: sh -lc "npm install --registry=https://registry.npmjs.org/ --legacy-peer-deps && PORT=5173 npm start"
     volumes:
       - ./frontend:/web
     environment:

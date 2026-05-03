@@ -101,3 +101,67 @@ class OpenRouterClient:
             result = parsed if isinstance(parsed, dict) else None
             log_event(self.logger, 'openrouter_request_success', trace_id=trace_id, has_shortlist=bool((result or {}).get('shortlist')))
             return result
+
+    async def coach_generate(self, member: dict, job: dict, missing_skills: list[str], *, trace_id: str) -> dict[str, Any] | None:
+        """Career Coach prompt — returns {suggested_headline, resume_tips} or None.
+
+        Separate from generate() because the coach is a synchronous one-shot call
+        from the member-facing flow; 30s timeout is deliberate (see Q4 decision).
+        """
+        self.refresh()
+        if not self.enabled:
+            return None
+        prompt = {
+            'member': {
+                'first_name': member.get('first_name'),
+                'last_name': member.get('last_name'),
+                'headline': member.get('headline'),
+                'skills': member.get('skills_json') or member.get('skills') or [],
+                'current_title': member.get('current_title'),
+                'current_company': member.get('current_company'),
+                'about': member.get('about_text') or member.get('about'),
+                'location': member.get('location') or member.get('location_text'),
+            },
+            'target_job': {
+                'title': job.get('title'),
+                'description': job.get('description') or job.get('description_text'),
+                'seniority_level': job.get('seniority_level'),
+                'skills_required': job.get('skills_required') or job.get('skills') or [],
+            },
+            'missing_skills': list(missing_skills or []),
+        }
+        system = (
+            'You are a career coach for a member applying to a specific job. '
+            'Return strict JSON with keys suggested_headline (string, max 100 chars) '
+            'and resume_tips (array of 2-4 short, actionable strings). '
+            'Base suggestions only on the member profile and job data provided; do not invent facts. '
+            'Do NOT include fields other than suggested_headline and resume_tips.'
+        )
+        log_event(self.logger, 'openrouter_coach_start', trace_id=trace_id, model=self.model, missing_skill_count=len(prompt['missing_skills']))
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {self._api_key}',
+                    'Content-Type': 'application/json',
+                    **({'HTTP-Referer': self.public_base_url} if self.public_base_url else {}),
+                    'X-Title': 'LinkedIn Career Coach',
+                },
+                json={
+                    'model': self.model,
+                    'response_format': {'type': 'json_object'},
+                    'messages': [
+                        {'role': 'system', 'content': system},
+                        {'role': 'user', 'content': json.dumps(prompt)},
+                    ],
+                    'temperature': 0.4,
+                },
+            )
+            log_event(self.logger, 'openrouter_coach_response', trace_id=trace_id, status_code=response.status_code)
+            response.raise_for_status()
+            data = response.json()
+            content = (((data.get('choices') or [{}])[0].get('message') or {}).get('content') or '{}')
+            if isinstance(content, list):
+                content = ''.join(part.get('text', '') for part in content if isinstance(part, dict))
+            parsed = json.loads(content)
+            return parsed if isinstance(parsed, dict) else None

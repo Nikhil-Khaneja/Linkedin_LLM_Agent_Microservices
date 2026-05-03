@@ -12,6 +12,18 @@ async def create_task(payload: dict = Body(...), authorization: str | None = Hea
 def list_tasks(authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
     return svc.list_tasks(authorization, trace_id(x_trace_id))
 
+@router.get('/ai/analytics/approval-rate')
+def approval_rate(authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
+    return svc.approval_rate(authorization, trace_id(x_trace_id))
+
+@router.get('/ai/analytics/match-quality')
+def match_quality(authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
+    return svc.match_quality(authorization, trace_id(x_trace_id))
+
+@router.post('/ai/coach/suggest')
+async def coach_suggest(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
+    return await svc.coach_suggest(payload, authorization, trace_id(x_trace_id))
+
 @router.get('/ai/tasks/{task_id}')
 def get_task(task_id: str, authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
     return svc.get_task(task_id, authorization, trace_id(x_trace_id))

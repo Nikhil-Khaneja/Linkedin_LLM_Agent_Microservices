@@ -128,6 +128,7 @@ export default function Layout() {
     { to:'/',            label:'Home',      icon:<HomeIcon /> },
     { to:'/jobs',        label:'Jobs',      icon:<JobIcon /> },
     { to:'/applications',label:'My Jobs',   icon:<BriefIcon /> },
+    { to:'/coach',       label:'Coach',     icon:<AIIcon /> },
     { to:'/connections', label:'Network',   icon:<NetIcon /> },
     { to:'/messages',    label:'Messaging', icon:<MsgIcon /> },
     { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
