@@ -1,167 +1,234 @@
-# LinkedIn Clone - Event-Driven Class Project Monorepo
+# LinkedIn Simulation — Distributed Systems Class Project
 
-This repository is a full-stack class-project implementation aligned to the uploaded LinkedIn Simulation + Agentic AI specification: eight backend owner services, one shared React frontend, Kafka-centered async workflows, Redis caching, Mongo/MySQL split, analytics, and a FastAPI AI orchestrator.
+Full-stack LinkedIn clone built as a distributed systems course project. Eight FastAPI microservices, React frontend, Kafka-first async flows, Redis caching, MySQL + MongoDB persistence, AI Career Coach, and JMeter performance benchmarks.
 
-## Team ownership model
+---
 
-- Owner 1: Auth + API edge
-- Owner 2: Member profile service
-- Owner 3: Recruiter + company service
-- Owner 4: Job service
-- Owner 5: Application service
-- Owner 6: Messaging + connections service
-- Owner 7: Analytics + logging service and shared Kafka host
-- Owner 8: AI orchestrator service
-- **Owner 9: Frontend deployment + JMeter + release verification**
+## Team
 
-## What is included
+| Person | Name | Responsibilities |
+|--------|------|-----------------|
+| Person 1 | Nikhil Khaneja | Kafka-first flows, auth/infra, exception handling, notifications, AWS Terraform |
+| Person 2 | Shreya | AI Career Coach, AI evaluation metrics, outreach drafts |
+| Person 3 | Drashti | Salary filter, FULLTEXT job search, low-traction chart, 10k dataset loader |
+| Person 4 | Sanjay | JMeter benchmarks, ECS task definitions, performance analysis |
 
-- Shared React frontend in `frontend/`
-- Eight FastAPI backend services in `backend/services/`
-- Kafka topic publishing and consumption for async flows
-- Redis-backed caches for hot reads and counters
-- MySQL and Mongo initialization scripts under `infra/`
-- Automated bootstrap scripts for schema, indexes, Kafka topics, and readiness checks under `scripts/`
-- Owner 9 frontend and JMeter deployment notes under `deploy/aws_accounts/owner9_frontend/`
-- Prometheus + Grafana observability configuration under `observability/`
-- API smoke tests under `tests/api/`
-- JMeter starter plans under `tests/jmeter/`
-- Local + AWS deployment docs under `docs/`
+---
 
-## Runtime modes
+## Architecture
 
-### 1. Local Docker mode
-- Kafka KRaft in Docker Compose
-- Redis-backed cache mode
-- Prometheus + Grafana ops dashboards
-- Frontend served by Vite dev server
-
-### 2. Sandbox test mode
-- MySQL-backed relational persistence for Owners 1-5
-- In-memory document store and event bus for sandbox tests only
-- In-memory cache and event/document modes are test-only
-
-## Built-in ops endpoints
-
-Every backend service exposes:
-- `GET /ops/healthz`
-- `GET /ops/cache-stats`
-- `GET /ops/metrics`
-
-Each service emits structured JSON request logs with trace IDs and request timing.
-
-## Redis caching implemented
-
-- Owner 1: login failure rate-limit metadata
-- Owner 4: job detail, search, recruiter job list cache + invalidation
-- Owner 6: unread counters
-- Owner 7: analytics response cache
-- Owner 8: AI task state cache
-
-`/ops/cache-stats` reports lookups, hits, misses, hit rate, and namespace-level breakdown per service.
-
-## Quick local start
-
-```bash
-cp .env.example .env
-chmod +x scripts/bootstrap_local.sh
-./scripts/bootstrap_local.sh
+```
+React Frontend (5173)
+        │
+        ▼
+┌──────────────────────────────────────────────────────┐
+│  FastAPI Services                                    │
+│  auth (8001) · member (8002) · recruiter (8003)     │
+│  jobs (8004) · applications (8005)                  │
+│  messaging (8006) · analytics (8007) · AI (8008)    │
+└──────────┬───────────────┬──────────────────────────┘
+           │               │
+        Kafka           Redis
+      (async)          (cache)
+           │
+    ┌──────┴──────┐
+  MySQL        MongoDB
+(relational)  (documents)
 ```
 
-Open:
-- Frontend: `http://localhost:5173`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000`
+**Kafka-first write path (Person 1):**
+`POST /applications/submit` → publishes `application.submit.requested` → Kafka consumer writes to MySQL → publishes `application.submitted` → returns HTTP 202
 
-Service docs:
-- Owner 1: `http://localhost:8001/docs`
-- Owner 4: `http://localhost:8004/docs`
-- Owner 6: `http://localhost:8006/docs`
-- Owner 7: `http://localhost:8007/docs`
-- Owner 8: `http://localhost:8008/docs`
+---
 
-## Bearer authorization
+## What's Implemented
 
-Protected APIs now validate RS256 bearer JWTs.
+### Core Services
+| Service | Port | Key Endpoints |
+|---------|------|---------------|
+| auth_service | 8001 | /auth/register, /auth/login, /auth/refresh, /auth/logout |
+| member_profile_service | 8002 | /members/create, get, update, search |
+| recruiter_company_service | 8003 | /recruiters/create, get, update; /companies/create |
+| jobs_service | 8004 | /jobs/create, get, update, close, search, byRecruiter, save |
+| applications_service | 8005 | /applications/submit (202 async), get, byJob, byMember, updateStatus |
+| messaging_connections_service | 8006 | /threads/open, /messages/send, /connections/request, accept, reject |
+| analytics_service | 8007 | /analytics/jobs/top, funnel, geo, member/dashboard, /benchmarks/report |
+| ai_orchestrator_service | 8008 | /ai/tasks/create, approve, reject; /ai/coach/suggest; /ai/analytics/approval-rate |
 
-- Owner 1 issues access tokens on `/auth/register`, `/auth/login`, and `/auth/refresh`.
-- Other services validate those tokens offline using the shared JWKS/public key configuration.
-- For separate AWS accounts, set `OWNER1_JWKS_URL` in every backend service to the public JWKS URL exposed by Owner 1.
+### Frontend Pages
+- **Jobs** — search, salary filter, save, apply (Kafka-first async)
+- **Job Detail** — resume upload/paste + apply
+- **Member Profile** — edit skills, headline, resume
+- **Applications** — status tracking (submitted → reviewing → interview → offer/rejected)
+- **Messaging** — threads + real-time send
+- **Connections** — request, accept, withdraw
+- **Notifications** — live badge count (polls every 10s), mark-as-read
+- **Recruiter Dashboard** — post/edit/close jobs, view applicants, update status, 5 analytics charts
+- **AI Dashboard** — shortlist candidates, approve/edit/reject outreach drafts
+- **Career Coach** — match score, suggested headline, skills to add, resume tips (OpenRouter LLM)
+- **Analytics** — recruiter metrics, member activity, performance benchmarks tab
 
-## Tests run in sandbox
+### Key Features
+- **Kafka-first submit** — application submit is fully async; HTTP 202 returned immediately
+- **Salary filter** — `salary_min` / `salary_max` columns + search filter (Person 3)
+- **FULLTEXT search** — MySQL FULLTEXT index on `jobs(title, location_text)` (Person 3)
+- **AI Career Coach** — `POST /ai/coach/suggest` scores your profile vs. job, suggests improvements (Person 2)
+- **Application funnel** — Viewed → Saved → Started → Submitted per job (dropdown selector)
+- **Geo chart** — city-wise applications per job (dropdown selector)
+- **Edit job** — inline edit form on Recruiter Dashboard
+- **Performance benchmarks** — 4 configs (B, B+S, B+S+K, B+S+K+Other) with live charts
+- **Exception handling** — duplicate email 409, duplicate application 409, closed job 409, DLQ
+- **Idempotency** — all write endpoints accept `Idempotency-Key` header
+- **RS256 JWT** — auth_service issues; all services validate offline via JWKS
 
-- `python3 -m compileall backend`
-- `pytest tests/api -q`
+---
 
-Results are captured in:
-- `tests/SANDBOX_TEST_RESULTS.txt`
-- `tests/last_pytest_run.txt`
+## Quick Start (Local)
 
-## Recommended docs to read next
+### 1. Clone & configure
 
-- `docs/architecture.md`
-- `docs/observability.md`
-- `docs/local_and_aws_run.md`
-- `docs/aws_multi_account_deploy.md`
-- `docs/owner9_frontend_testing.md`
+```bash
+git clone https://github.com/Nikhil-Khaneja/Linkedin_Prototype_LLM_Agent_Microservices.git
+cd Linkedin_Prototype_LLM_Agent_Microservices
+cp .env.example .env
+# Edit .env: set OPENROUTER_API_KEY for AI Coach (optional but recommended)
+```
 
-## Current status
+### 2. Start all services
 
-This package now uses repository-backed persistence instead of the deprecated JSON file store:
-- Owners 1-5 run through the shared relational repository layer
-- Owners 6-8 run through the shared document repository layer
-- `services.shared.persist` remains only as a deprecated guard so old imports fail loudly
-- Kafka memory mode is test-only; non-test environments must use Kafka
+```bash
+docker compose up -d
+# Wait ~60s for all health checks
+docker compose ps   # all 17 should show healthy/Up
+```
 
-The strongest validation completed in the sandbox is:
-- compile check
-- full API smoke suite
-- messaging idempotency
-- connection graph flow
-- observability endpoints
+### 3. Apply schema & seed data
 
-Detailed handoff docs are still included in:
-- `docs/COPILOT_HANDOFF_LINKEDIN_CLONE.md`
-- `docs/FILL_THE_GAP_PLAYBOOK.md`
+```bash
+bash scripts/bootstrap_local.sh          # migrations + Kafka topics
+/opt/homebrew/bin/python3 scripts/seed_demo_data.py   # creates demo accounts + seed jobs
+/opt/homebrew/bin/python3 scripts/load_kaggle_datasets.py --synthetic  # loads 10k jobs + 5k members
+```
 
-## Automated bootstrap files
+### 4. Open the app
 
-- `scripts/bootstrap_local.sh`
-- `scripts/wait_for_stack.py`
-- `scripts/apply_mysql_schema.sh`
-- `scripts/apply_mongo_init.sh`
-- `scripts/create_kafka_topics.sh`
-- `docs/DB_SETUP_AUTOMATION.md`
+| URL | What |
+|-----|------|
+| http://localhost:5173 | Frontend |
+| http://localhost:3000 | Grafana (admin/admin) |
+| http://localhost:9000 | MinIO (minioadmin/minioadmin) |
+| http://localhost:8001/docs | Auth service Swagger |
 
+---
 
-## Review fixes completed in this bundle
+## Demo Accounts
 
-- **Transactional outbox path**: Owners 4 and 5 now persist domain writes and outbox rows in the same relational transaction. Owners 6 and 8 use a durable document outbox plus background dispatch.
-- **Materialized analytics rollups**: Owner 7 now updates `events_rollup` incrementally on ingest/consume and reads dashboards from rollups instead of scanning raw events.
-- **Cross-account validation tooling**: run `python3 deploy/aws_accounts/validate_multi_account.py --env-dir deploy/aws_accounts/env` before deploying the separate AWS owner accounts.
-- **Frontend production bundle**: a prebuilt static bundle is included in `frontend/dist/` and can be served directly by Owner 9.
+| Role | Email | Password |
+|------|-------|----------|
+| Member | ava@example.com | StrongPass#1 |
+| Recruiter | recruiter@example.com | RecruiterPass#1 |
 
-## Validation completed in sandbox
+---
 
-- `python3 -m compileall backend`
-- `pytest tests/api -q` -> 5 passed
-- `python3 deploy/aws_accounts/validate_multi_account.py --env-dir deploy/aws_accounts/env` -> OK
-- `./scripts/build_frontend_static.sh`
+## Performance Benchmarks (Person 4)
 
+```bash
+# Run all 4 configs (requires full stack running):
+/opt/homebrew/bin/python3 scripts/run_performance_benchmarks.py --all
 
-## Applied local fixes
-- MySQL 8.4-compatible schema/index scripts
-- Removed deprecated mysql_native_password compose flag
-- Added cryptography dependency for RS256 JWT/JWKS
-- Added CORS middleware for local frontend calls
-- Fixed MySQL named parameter adaptation in shared relational layer
+# Or individual config:
+/opt/homebrew/bin/python3 scripts/run_performance_benchmarks.py --config "B+S+K"
+```
 
+Results stored in analytics_service → visible in **Analytics → Performance & benchmarks** tab.
 
-## Phase 1 refactor additions
-- Shared React frontend from the uploaded `linkedin-final.zip`, patched to call local Python services on ports 8001-8008.
-- `auth_service` refactored into app/routes/services/repositories/core/middleware.
+| Config | Description |
+|--------|-------------|
+| B | Baseline — no Redis, no Kafka |
+| B+S | Base + Redis cache |
+| B+S+K | Base + Redis + Kafka (default stack) |
+| B+S+K+Other | Base + Redis + Kafka + scaled replicas |
 
+---
 
-## AWS note
-- This bundle keeps MySQL as the source of truth and Redis as a cache.
-- Use managed RDS/Aurora for MySQL and ElastiCache for Redis in AWS.
+## Ops Endpoints
+
+Every service exposes:
+```
+GET /ops/healthz      → {"status": "ok", "service": "...", "version": "..."}
+GET /ops/cache-stats  → {"lookups": n, "hits": n, "misses": n, "hit_rate": 0.xx}
+GET /ops/metrics      → Prometheus text format
+```
+
+---
+
+## Tests
+
+```bash
+# Compile check:
+python3 -m compileall backend
+
+# API smoke tests:
+/opt/homebrew/bin/python3 -m pytest tests/api -q -p no:deepeval
+```
+
+---
+
+## Project Structure
+
+```
+├── backend/
+│   └── services/
+│       ├── shared/              # JWT, Kafka bus, Redis cache, repositories
+│       ├── auth_service/
+│       ├── member_profile_service/
+│       ├── recruiter_company_service/
+│       ├── jobs_service/
+│       ├── applications_service/
+│       ├── messaging_connections_service/
+│       ├── analytics_service/
+│       └── ai_orchestrator_service/
+├── frontend/
+│   └── src/pages/               # React pages (Jobs, Profile, Coach, Analytics, …)
+├── infra/
+│   ├── mysql/                   # 001–006 migration files
+│   └── mongo/                   # MongoDB init
+├── deploy/
+│   └── aws_accounts/            # Per-owner docker-compose.aws.yml + ECS task defs
+├── infra/aws/                   # Terraform (VPC, ALB, ECS, RDS, ElastiCache, ECR)
+├── scripts/                     # bootstrap, seed, load_kaggle_datasets, benchmarks
+├── tests/
+│   ├── api/                     # pytest smoke tests
+│   └── jmeter/                  # scenario_a.jmx, scenario_b.jmx
+├── observability/               # Prometheus, Grafana, Promtail config
+└── docs/
+    ├── LOCAL_SETUP_RUNBOOK.md   # Step-by-step local setup guide
+    ├── PERFORMANCE_ANALYSIS.md  # Benchmark results write-up
+    ├── architecture.md
+    └── aws_deploy_step_by_step.md
+```
+
+---
+
+## AWS Deployment
+
+Terraform infrastructure in `infra/aws/`:
+- VPC + subnets + security groups
+- ALB with path-based routing
+- ECS Fargate (8 backend services + frontend)
+- RDS MySQL, ElastiCache Redis, DocumentDB, ECR
+
+Per-owner EC2 deployment configs in `deploy/aws_accounts/` (owner1–owner9).
+
+```bash
+cd infra/aws
+terraform init && terraform apply
+bash push_images.sh    # build + push ECR images
+bash deploy.sh         # register task defs + update ECS services
+```
+
+---
+
+## Local Setup Runbook
+
+See `docs/LOCAL_SETUP_RUNBOOK.md` for the complete step-by-step guide to reproduce the full local stack from scratch.
