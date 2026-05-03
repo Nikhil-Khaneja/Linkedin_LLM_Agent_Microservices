@@ -96,8 +96,16 @@ class MemberProfileService:
             return success(cached['body'], trc, {**cached['meta'], 'cache': 'hit'})
         items = self.repo.search(skill=payload.get("skill") or "", location=payload.get("location") or "", keyword=payload.get("keyword") or "")
         items = [m for m in items if m.get('member_id') != actor.get('sub')]
-        page = payload.get("page", 1)
-        page_size = payload.get("page_size", 10)
+        try:
+            page = int(payload.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = max(1, page)
+        try:
+            page_size = int(payload.get("page_size", 10))
+        except (TypeError, ValueError):
+            page_size = 10
+        page_size = max(1, min(page_size, 5000))
         start = (page - 1) * page_size
         shaped = [{"member_id": m["member_id"], "first_name": m.get("first_name", ""), "last_name": m.get("last_name", ""), "headline": m.get("headline", ""), "city": m.get("city") or m.get("location") or '', "location": m.get("location", ''), "skills": m.get("skills", [])[:5], "profile_photo_url": m.get("profile_photo_url", '')} for m in items]
         body = {"items": shaped[start:start+page_size]}

@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line,
+} from 'recharts';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -20,6 +24,18 @@ export default function RecruiterDashboard() {
   const [companyForm, setCompanyForm] = useState({ company_name:'', company_industry:'', company_size:'medium' });
   const [savingCompany, setSavingCompany] = useState(false);
   const [sentConnections, setSentConnections] = useState({});
+  const [chartTop, setChartTop] = useState([]);
+  const [chartLow, setChartLow] = useState([]);
+  const [chartViews, setChartViews] = useState([]);
+  const [chartSaves, setChartSaves] = useState([]);
+  const [geoJobId, setGeoJobId] = useState('');
+  const [chartGeo, setChartGeo] = useState([]);
+  const [funnelJobId, setFunnelJobId] = useState('');
+  const [chartFunnel, setChartFunnel] = useState([]);
+  const [chartsLoading, setChartsLoading] = useState(false);
+  const [editingJob, setEditingJob] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
 
   const recruiterId = user?.principalId || user?.userId;
   const token = localStorage.getItem('access_token');
@@ -84,13 +100,84 @@ export default function RecruiterDashboard() {
 
   const loadJobs = async (rid) => {
     try {
-      const { data } = await axios.post(`${BASE.job}/jobs/byRecruiter`, { recruiter_id: rid || recruiterId, page_size: 100 }, authCfg);
+      const { data } = await axios.post(`${BASE.job}/jobs/byRecruiter`, { recruiter_id: rid || recruiterId, page: 1, page_size: 15 }, authCfg);
       setJobs(data?.data?.items || []);
     } catch (err) {
       setJobs([]);
       if (err?.response?.data?.error?.message) toast.error(err.response.data.error.message);
     }
   };
+
+  const loadAnalyticsCharts = async () => {
+    if (!token || !recruiterId) return;
+    setChartsLoading(true);
+    try {
+      const [topData, lowData, viewData, saveData] = await Promise.all([
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'applications', limit: 10, sort: 'desc' }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'applications', limit: 5, sort: 'asc' }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'views', limit: 8 }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'saves', limit: 8 }, authCfg),
+      ]);
+      const mapBar = (items) => (items || []).map((j) => ({ name: (j.title || j.job_id || 'Job').slice(0, 18), count: j.count || j.metric_value || 0 }));
+      setChartTop(mapBar(topData.data?.data?.items || []));
+      setChartLow(mapBar(lowData.data?.data?.items || []));
+      setChartViews((viewData.data?.data?.items || []).map((j) => ({ name: (j.title || j.job_id || 'Job').slice(0, 16), clicks: j.count || j.metric_value || 0 })));
+      setChartSaves((saveData.data?.data?.items || []).map((j) => ({ name: (j.title || j.job_id || 'Job').slice(0, 16), saved: j.count || j.metric_value || 0 })));
+    } catch {
+      setChartTop([]);
+      setChartLow([]);
+      setChartViews([]);
+      setChartSaves([]);
+    } finally {
+      setChartsLoading(false);
+    }
+  };
+
+  const loadGeoChart = async (jid) => {
+    if (!jid || !token) {
+      setChartGeo([]);
+      return;
+    }
+    try {
+      const { data } = await axios.post(`${BASE.analytics}/analytics/geo`, { job_id: jid, window_days: 30 }, authCfg);
+      const geo = data.data?.geo_distribution || data.data?.items || [];
+      setChartGeo(geo.slice(0, 8).map((g) => ({ name: String(g.key || 'Unknown').slice(0, 14), count: g.count || g.application_count || 0 })));
+    } catch {
+      setChartGeo([]);
+    }
+  };
+
+  useEffect(() => {
+    if (token && recruiterId) loadAnalyticsCharts();
+  }, [token, recruiterId]);
+
+  useEffect(() => {
+    if (!jobs.length) return;
+    setGeoJobId((prev) => prev || jobs[0].job_id);
+    setFunnelJobId((prev) => prev || jobs[0].job_id);
+  }, [jobs]);
+
+  useEffect(() => {
+    if (geoJobId && token) loadGeoChart(geoJobId);
+  }, [geoJobId, token]);
+
+  const loadFunnelChart = async (jid) => {
+    if (!jid || !token) { setChartFunnel([]); return; }
+    try {
+      const { data } = await axios.post(`${BASE.analytics}/analytics/funnel`, { job_id: jid }, authCfg);
+      const f = data.data?.funnel || {};
+      setChartFunnel([
+        { stage: 'Viewed',    count: f.viewed || 0 },
+        { stage: 'Saved',     count: f.saved || 0 },
+        { stage: 'Started',   count: f.apply_started || 0 },
+        { stage: 'Submitted', count: f.submitted || 0 },
+      ]);
+    } catch { setChartFunnel([]); }
+  };
+
+  useEffect(() => {
+    if (funnelJobId && token) loadFunnelChart(funnelJobId);
+  }, [funnelJobId, token]);
 
   const postJob = async () => {
     if (!recruiterInfo?.company_name) {
@@ -115,6 +202,7 @@ export default function RecruiterDashboard() {
       setShowForm(false);
       setForm({ title:'', description:'', employment_type:'full_time', work_mode:'onsite', city:'', state:'', seniority_level:'mid', salary_min:'', salary_max:'', skills_required:'' });
       loadJobs(recruiterId);
+      loadAnalyticsCharts();
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Failed to post job');
     } finally { setPosting(false); }
@@ -148,6 +236,49 @@ export default function RecruiterDashboard() {
       loadJobs(recruiterId);
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Failed to close job');
+    }
+  };
+
+  const openEditJob = (job) => {
+    setEditingJob(job.job_id);
+    setEditForm({
+      title: job.title || '',
+      description: job.description_text || job.description || '',
+      employment_type: job.employment_type || 'full_time',
+      work_mode: job.work_mode || 'onsite',
+      city: job.city || '',
+      state: job.state || '',
+      seniority_level: job.seniority_level || 'mid',
+      salary_min: job.salary_min || '',
+      salary_max: job.salary_max || '',
+      skills_required: (job.skills_required || []).join(', '),
+    });
+  };
+
+  const saveEditJob = async (jobId) => {
+    setSaving(true);
+    try {
+      const payload = {
+        job_id: jobId,
+        title: editForm.title,
+        description_text: editForm.description,
+        employment_type: editForm.employment_type,
+        work_mode: editForm.work_mode,
+        city: editForm.city,
+        state: editForm.state,
+        seniority_level: editForm.seniority_level,
+        salary_min: editForm.salary_min ? Number(editForm.salary_min) : null,
+        salary_max: editForm.salary_max ? Number(editForm.salary_max) : null,
+        skills_required: editForm.skills_required.split(',').map(s => s.trim()).filter(Boolean),
+      };
+      await axios.post(`${BASE.job}/jobs/update`, payload, authCfg);
+      toast.success('Job updated');
+      setEditingJob(null);
+      loadJobs(recruiterId);
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to update job');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -217,6 +348,113 @@ export default function RecruiterDashboard() {
         </div>
       </div>
 
+      <div style={{ ...S.card, padding: 24, marginBottom: 16 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Hiring analytics</h2>
+        <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.55)', marginBottom: 16 }}>Rollups from applications, views, and saves (Kafka-backed pipeline).</p>
+        {chartsLoading ? (
+          <p style={{ color: 'rgba(0,0,0,0.5)' }}>Loading charts…</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
+            <ChartCard title="Top jobs by applications">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartTop} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" height={60} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#0a66c2" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Jobs needing attention (fewest applications)">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartLow} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" height={60} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#b54708" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Job detail views (clicks)">
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartViews} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" height={60} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="clicks" stroke="#057642" strokeWidth={2} dot />
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Saved jobs (recent activity)">
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartSaves} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" height={60} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="saved" stroke="#7c3aed" strokeWidth={2} dot />
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <ChartCard title="Applications by city (select a job)">
+                {jobs.length === 0 ? (
+                  <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }}>Post at least one job to load city-level application data.</p>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: 12 }}>
+                      <select value={geoJobId} onChange={(e) => setGeoJobId(e.target.value)} style={{ ...S.inp, maxWidth: '100%' }}>
+                        {jobs.map((j) => (
+                          <option key={j.job_id} value={j.job_id}>{(j.title || j.job_id || '').slice(0, 60)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={chartGeo} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#0a66c2" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </>
+                )}
+              </ChartCard>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <ChartCard title="Application funnel (select a job)">
+                {jobs.length === 0 ? (
+                  <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }}>Post at least one job to see the application funnel.</p>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: 12 }}>
+                      <select value={funnelJobId} onChange={(e) => setFunnelJobId(e.target.value)} style={{ ...S.inp, maxWidth: '100%' }}>
+                        {jobs.map((j) => (
+                          <option key={j.job_id} value={j.job_id}>{(j.title || j.job_id || '').slice(0, 60)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={chartFunnel} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="stage" tick={{ fontSize: 13 }} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#057642" radius={[4, 4, 0, 0]} label={{ position: 'top', fontSize: 12 }} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </>
+                )}
+              </ChartCard>
+            </div>
+          </div>
+        )}
+      </div>
+
       {showForm && (
         <div style={{ ...S.card, padding:28, marginBottom:16 }}>
           <h2 style={{ fontSize:20, fontWeight:700, marginBottom:20 }}>Create a job posting</h2>
@@ -266,9 +504,36 @@ export default function RecruiterDashboard() {
               </div>
               <div style={{ display:'flex', gap:8, flexShrink:0 }}>
                 <button onClick={() => viewApplicants(job)} style={S.viewBtn}>{expandedJob?.job_id===job.job_id ? 'Hide applicants' : `View applicants (${job.applicants_count || 0})`}</button>
+                {job.status==='open' && <button onClick={() => openEditJob(job)} style={S.smallBtn}>Edit</button>}
                 {job.status==='open' && <button onClick={() => closeJob(job.job_id)} style={S.closeJobBtn}>Close</button>}
               </div>
             </div>
+            {editingJob === job.job_id && (
+              <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', padding:'16px 20px', background:'#f9fafb' }}>
+                <h4 style={{ fontSize:15, fontWeight:700, marginBottom:14 }}>Edit Job</h4>
+                <div style={S.formGrid}>
+                  <FField label="Job Title" value={editForm.title} onChange={e => setEditForm(p=>({...p,title:e.target.value}))} />
+                  <FSel label="Seniority Level" value={editForm.seniority_level} onChange={e => setEditForm(p=>({...p,seniority_level:e.target.value}))} options={['intern','junior','mid','senior','lead','manager','director','vp','c_level']} />
+                  <FSel label="Employment Type" value={editForm.employment_type} onChange={e => setEditForm(p=>({...p,employment_type:e.target.value}))} options={['full_time','part_time','contract','internship','temporary']} />
+                  <FSel label="Work Mode" value={editForm.work_mode} onChange={e => setEditForm(p=>({...p,work_mode:e.target.value}))} options={['onsite','remote','hybrid']} />
+                  <FField label="City" value={editForm.city} onChange={e => setEditForm(p=>({...p,city:e.target.value}))} />
+                  <FField label="State" value={editForm.state} onChange={e => setEditForm(p=>({...p,state:e.target.value}))} />
+                  <FField label="Min Salary ($)" type="number" value={editForm.salary_min} onChange={e => setEditForm(p=>({...p,salary_min:e.target.value}))} placeholder="e.g. 80000" />
+                  <FField label="Max Salary ($)" type="number" value={editForm.salary_max} onChange={e => setEditForm(p=>({...p,salary_max:e.target.value}))} placeholder="e.g. 120000" />
+                  <div style={{ gridColumn:'1/-1' }}>
+                    <FField label="Skills (comma-separated)" value={editForm.skills_required} onChange={e => setEditForm(p=>({...p,skills_required:e.target.value}))} placeholder="Python, React, SQL…" />
+                  </div>
+                  <div style={{ gridColumn:'1/-1' }}>
+                    <label style={S.lbl}>Description</label>
+                    <textarea style={{...S.inp, height:80, resize:'vertical'}} value={editForm.description} onChange={e => setEditForm(p=>({...p,description:e.target.value}))} />
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                  <button onClick={() => saveEditJob(job.job_id)} disabled={saving} style={S.submitBtn}>{saving ? 'Saving…' : 'Save changes'}</button>
+                  <button onClick={() => setEditingJob(null)} style={S.cancelBtn}>Cancel</button>
+                </div>
+              </div>
+            )}
             {expandedJob?.job_id === job.job_id && (
               <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', padding:'16px 20px', background:'#fafafa' }}>
                 <h4 style={{ fontSize:16, fontWeight:700, marginBottom:14 }}>Applicants — {applicants.length} total</h4>
@@ -300,6 +565,15 @@ export default function RecruiterDashboard() {
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+function ChartCard({ title, children }) {
+  return (
+    <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 8, padding: 12, background: '#fafafa' }}>
+      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{title}</h3>
+      {children}
     </div>
   );
 }

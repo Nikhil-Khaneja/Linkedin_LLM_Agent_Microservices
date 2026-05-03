@@ -14,6 +14,8 @@ from services.shared.kafka_bus import consume_forever, publish_event
 from services.shared.observability import get_logger, log_event
 from services.shared.relational import execute, fetch_one
 from services.shared.resume_parser import extract_text_from_bytes
+from services.shared.media_signed_url import default_member_public_url, member_media_proxy_url
+from services.shared.resume_structure import merge_skills_from_resume, structured_profile_from_resume_text
 from services.shared.storage import (
     MINIO_BUCKET_PROFILE,
     MINIO_BUCKET_RESUME,
@@ -144,24 +146,99 @@ class MediaUploadService:
         profile_photo_url = row.get('profile_photo_url') or ''
         resume_url = row.get('resume_url') or ''
         resume_text_db = row.get('resume_text') or ''
+        about_text = row.get('about_text') or ''
+        experience_json = row.get('experience_json') or '[]'
+        skills_json = row.get('skills_json') or '[]'
         if upload.get('media_type') == 'profile_photo':
-            profile_photo_url = upload.get('file_url') or profile_photo_url
+            bucket = upload.get('bucket') or MINIO_BUCKET_PROFILE
+            obj = (upload.get('object_name') or '').strip()
+            profile_photo_url = (
+                member_media_proxy_url(default_member_public_url(), member_id, bucket, obj, ttl_seconds=86400 * 7)
+                or (upload.get('file_url') or profile_photo_url)
+            )
             payload['profile_photo_url'] = profile_photo_url
+            # Stable keys so /members/get can mint a fresh proxy URL (stored URLs expire).
+            payload['profile_photo_bucket'] = bucket
+            payload['profile_photo_object'] = obj
         elif upload.get('media_type') == 'resume':
-            resume_url = upload.get('file_url') or resume_url
+            rbucket = upload.get('bucket') or MINIO_BUCKET_RESUME
+            robj = (upload.get('object_name') or '').strip()
+            resume_url = (
+                member_media_proxy_url(default_member_public_url(), member_id, rbucket, robj, ttl_seconds=86400 * 7)
+                or (upload.get('file_url') or resume_url)
+            )
             resume_text_db = resume_text or resume_text_db
             payload['resume_url'] = resume_url
+            payload['resume_bucket'] = rbucket
+            payload['resume_object'] = robj
             if resume_text_db:
                 payload['resume_text'] = resume_text_db
+        if upload.get('media_type') == 'resume' and (resume_text_db or '').strip():
+            rt = (resume_text_db or '').strip()
+            struct = structured_profile_from_resume_text(rt)
+
+            def _exp_blank(e):
+                if not isinstance(e, dict):
+                    return True
+                return not any(str(e.get(k) or '').strip() for k in ('title', 'company', 'description', 'start_year', 'end_year'))
+
+            try:
+                exp_list = json.loads(experience_json) if experience_json else []
+            except Exception:
+                exp_list = []
+            try:
+                skills_list = json.loads(skills_json) if skills_json else []
+            except Exception:
+                skills_list = []
+
+            if not str(about_text).strip() and (struct.get('about_summary') or '').strip():
+                about_text = struct['about_summary'].strip()[:8000]
+                payload['about_summary'] = about_text
+
+            inferred_exp = struct.get('experience') or []
+            if inferred_exp and (not exp_list or all(_exp_blank(e) for e in exp_list)):
+                experience_json = json.dumps(inferred_exp)
+                payload['experience'] = inferred_exp
+            elif not exp_list or all(_exp_blank(e) for e in exp_list):
+                experience_json = json.dumps(
+                    [
+                        {
+                            'title': '',
+                            'company': '',
+                            'location': '',
+                            'employment_type': '',
+                            'start_month': '',
+                            'start_year': '',
+                            'end_month': '',
+                            'end_year': '',
+                            'is_current': False,
+                            'description': rt[:12000],
+                        }
+                    ]
+                )
+                payload['experience'] = json.loads(experience_json)
+
+            if not skills_list:
+                merged_skills = merge_skills_from_resume(rt, [], limit=24)
+                if merged_skills:
+                    skills_json = json.dumps(merged_skills)
+                    payload['skills'] = merged_skills
         try:
             execute(
-                'UPDATE members SET payload_json=:payload_json, profile_photo_url=:profile_photo_url, resume_url=:resume_url, resume_text=:resume_text WHERE member_id=:member_id',
+                """
+                UPDATE members SET payload_json=:payload_json, profile_photo_url=:profile_photo_url, resume_url=:resume_url,
+                resume_text=:resume_text, about_text=:about_text, experience_json=:experience_json, skills_json=:skills_json
+                WHERE member_id=:member_id
+                """,
                 {
                     'member_id': member_id,
                     'payload_json': json.dumps(payload),
                     'profile_photo_url': profile_photo_url,
                     'resume_url': resume_url,
                     'resume_text': resume_text_db,
+                    'about_text': about_text,
+                    'experience_json': experience_json if isinstance(experience_json, str) else json.dumps(experience_json),
+                    'skills_json': skills_json if isinstance(skills_json, str) else json.dumps(skills_json),
                 },
             )
             delete_key(f'member:pending:update:{member_id}')

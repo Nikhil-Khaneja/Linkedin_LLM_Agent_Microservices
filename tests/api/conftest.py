@@ -9,6 +9,30 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _clear_cached_services() -> None:
+    """Fresh service instances per test (lru_cache survives importlib.reload of app.main)."""
+    for mod_name in (
+        'services.auth_service.app.core.deps',
+        'services.member_profile_service.app.core.deps',
+        'services.recruiter_company_service.app.core.deps',
+        'services.jobs_service.app.core.deps',
+        'services.applications_service.app.core.deps',
+        'services.messaging_connections_service.app.core.deps',
+        'services.analytics_service.app.core.deps',
+        'services.ai_orchestrator_service.app.core.deps',
+    ):
+        mod = importlib.import_module(mod_name)
+        for obj in list(vars(mod).values()):
+            if callable(obj) and hasattr(obj, 'cache_clear'):
+                obj.cache_clear()
+    try:
+        import services.jobs_service.app.services.job_command_service as _job_cmd
+
+        _job_cmd._service = None
+    except Exception:
+        pass
+
+
 @pytest.fixture()
 def clients():
     tmp = tempfile.TemporaryDirectory()
@@ -17,11 +41,27 @@ def clients():
     os.environ['EVENT_BUS_MODE'] = 'memory'
     os.environ['CACHE_MODE'] = 'memory'
     os.environ['DOC_STORE_MODE'] = 'memory'
+    os.environ['APPLICATION_SUBMIT_KAFKA_FIRST'] = 'false'
     os.environ['DATABASE_URL'] = os.environ.get('DATABASE_URL', 'mysql://root:root@localhost:3306/linkedin_sim')
 
     backend_root = str((Path(__file__).resolve().parents[2] / 'backend'))
     if backend_root not in sys.path:
         sys.path.insert(0, backend_root)
+
+    # run_api_tests_host.sh sets MYSQL_HOST=127.0.0.1; PyMongo must not use Docker hostname "mongo" from .env.
+    if os.environ.get('MYSQL_HOST') in ('127.0.0.1', 'localhost'):
+        os.environ['MONGO_URL'] = 'mongodb://127.0.0.1:27017'
+        os.environ['MONGO_URI'] = os.environ['MONGO_URL']
+        try:
+            import services.shared.notifications as _notif
+            _notif._CLIENT = None
+        except Exception:
+            pass
+        try:
+            from services.member_profile_service.app.routes import members as _members_routes
+            _members_routes._MONGO_CLIENT = None
+        except Exception:
+            pass
 
     import services.shared.common as common
     import services.shared.kafka_bus as kafka_bus
@@ -39,6 +79,7 @@ def clients():
     cache.reset_memory_cache()
     document_store.reset_memory_store()
     common.IDEMPOTENCY.clear()
+    _clear_cached_services()
 
     module_names = [
         'services.auth_service.app.main',
@@ -51,6 +92,7 @@ def clients():
         'services.ai_orchestrator_service.app.main',
     ]
     mods = {name: importlib.reload(importlib.import_module(name)) for name in module_names}
+    _clear_cached_services()
 
     with ExitStack() as stack:
         out = {

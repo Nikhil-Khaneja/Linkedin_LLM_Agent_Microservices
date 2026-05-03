@@ -66,6 +66,8 @@ def presigned_put(bucket: str, object_name: str, expiry_seconds: int = 3600) -> 
 
 
 def presigned_get(bucket: str, object_name: str, expiry_seconds: int = 3600) -> str:
+    """Mint a presigned GET. Must use the internal MinIO client (MINIO_ENDPOINT); public_client uses
+    MINIO_PUBLIC_ENDPOINT which is often localhost — unreachable from inside Docker, breaking uploads."""
     ensure_bucket(bucket)
     signed = client().get_presigned_url('GET', bucket, object_name, expires=timedelta(seconds=expiry_seconds))
     return _rewrite_public_url(signed)
