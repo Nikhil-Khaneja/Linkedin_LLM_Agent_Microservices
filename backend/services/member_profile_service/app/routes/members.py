@@ -469,6 +469,7 @@ async def search_members(payload: dict = Body(...), authorization: str | None = 
             """
             SELECT * FROM members
             WHERE is_deleted = 0
+              AND member_id LIKE 'mem_%'
               AND member_id <> :self_id
               AND (
                 lower(first_name) LIKE :like OR
@@ -490,7 +491,9 @@ async def search_members(payload: dict = Body(...), authorization: str | None = 
         rows = fetch_all(
             """
             SELECT * FROM members
-            WHERE is_deleted = 0 AND member_id <> :self_id
+            WHERE is_deleted = 0
+              AND member_id LIKE 'mem_%'
+              AND member_id <> :self_id
             ORDER BY first_name ASC, last_name ASC
             LIMIT :limit OFFSET :offset
             """,

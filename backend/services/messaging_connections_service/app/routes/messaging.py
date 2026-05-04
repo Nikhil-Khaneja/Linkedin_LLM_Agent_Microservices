@@ -52,6 +52,10 @@ def sent_connections(payload: dict = Body(...), authorization: str | None = Head
 async def withdraw_connection(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_messaging_service)):
     return await svc.withdraw_connection(payload, authorization, trace_id(x_trace_id))
 
+@router.post('/connections/remove')
+async def remove_connection(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_messaging_service)):
+    return await svc.remove_connection(payload, authorization, trace_id(x_trace_id))
+
 @router.post('/connections/pending')
 def pending_connections(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_messaging_service)):
     return svc.pending_connections(payload, authorization, trace_id(x_trace_id))

@@ -155,3 +155,29 @@ class RecruiterCompanyService:
             'profile_photo_url': recruiter.get('profile_photo_url'),
         }
         return success({'recruiter': public_profile}, trc)
+
+    def search_recruiters(self, payload, authorization, trc):
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        if actor['role'] not in {'member', 'recruiter', 'admin'}:
+            return fail('forbidden', 'You are not allowed to search recruiters.', trc, status_code=403)
+        keyword = (payload.get('keyword') or '').strip()
+        if not keyword:
+            return success({'items': []}, trc, {'total': 0})
+        try:
+            page_size = int(payload.get('page_size') or 50)
+        except (TypeError, ValueError):
+            page_size = 50
+        page_size = max(1, min(page_size, 500))
+        try:
+            page = int(payload.get('page') or 1)
+        except (TypeError, ValueError):
+            page = 1
+        page = max(1, page)
+        offset = (page - 1) * page_size
+        items = self.repo.search_recruiters(keyword, limit=page_size, offset=offset)
+        if actor['role'] == 'recruiter':
+            items = [r for r in items if r.get('recruiter_id') != actor.get('sub')]
+        return success({'items': items}, trc, {'total': len(items), 'page': page, 'page_size': page_size})

@@ -17,6 +17,10 @@ def get_recruiter(payload: dict = Body(default={}), authorization: str | None = 
 def public_get_recruiter(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_recruiter_service)):
     return svc.public_get_recruiter(payload, authorization, trace_id(x_trace_id))
 
+@router.post('/recruiters/search')
+def search_recruiters(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_recruiter_service)):
+    return svc.search_recruiters(payload, authorization, trace_id(x_trace_id))
+
 @router.post('/recruiters/update')
 def update_recruiter(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_recruiter_service)):
     return svc.update_recruiter(payload, authorization, trace_id(x_trace_id))

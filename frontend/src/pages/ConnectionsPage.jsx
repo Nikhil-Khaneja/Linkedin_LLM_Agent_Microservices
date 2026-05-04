@@ -12,11 +12,13 @@ export default function ConnectionsPage() {
   const [pendingSent, setPendingSent] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  const [recruiterSearchResults, setRecruiterSearchResults] = useState([]);
   const [mutualCounts, setMutualCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
 
   const currentId = user?.principalId || user?.userId;
+  const isRecruiterUser = user?.userType === 'recruiter';
   const token = localStorage.getItem('access_token');
   const authCfg = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
 
@@ -27,11 +29,13 @@ export default function ConnectionsPage() {
 
   useEffect(() => {
     if (!currentId || !token) return undefined;
-    const timer = setInterval(() => {
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       loadConnections();
       loadPendingIncoming();
       loadPendingSent();
-    }, 8000);
+    };
+    const timer = setInterval(tick, 25000);
     return () => clearInterval(timer);
   }, [currentId, token]);
 
@@ -57,9 +61,23 @@ export default function ConnectionsPage() {
   const sentReceiverIds = useMemo(() => new Set((pendingSent || []).map((req) => req.receiver_id)), [pendingSent]);
   const connectedIds = useMemo(() => new Set((connections || []).map((conn) => conn.other_user_id || conn.user_id)), [connections]);
   const filteredSearchResults = useMemo(
-    () => (searchResults || []).filter((m) => m.member_id && m.member_id !== currentId && m.email !== user?.email),
+    () => (searchResults || []).filter(
+      (m) => m.member_id
+        && String(m.member_id).startsWith('mem_')
+        && m.member_id !== currentId
+        && m.email !== user?.email,
+    ),
     [searchResults, currentId, user?.email]
   );
+
+  const filteredRecruiterResults = useMemo(
+    () => (recruiterSearchResults || []).filter(
+      (r) => r.recruiter_id && String(r.recruiter_id).startsWith('rec_') && r.recruiter_id !== currentId,
+    ),
+    [recruiterSearchResults, currentId],
+  );
+
+  const totalSearchHits = filteredSearchResults.length + filteredRecruiterResults.length;
 
   const loadAll = async () => {
     setLoading(true);
@@ -121,11 +139,28 @@ export default function ConnectionsPage() {
     if (!searchQuery.trim()) return;
     if (!token) return toast.error('Please sign in first');
     setSearching(true);
+    setRecruiterSearchResults([]);
     try {
-      const { data } = await axios.post(`${BASE.member}/members/search`, { keyword: searchQuery.trim(), page: 1, page_size: 800, media_public_base: BASE.member }, authCfg);
-      const items = data?.data?.items || [];
-      setSearchResults(items);
-      if (items.filter((m) => m.member_id !== currentId).length === 0) toast('No members found for that search', { icon: '🔍' });
+      const kw = searchQuery.trim();
+      const memberReq = axios.post(`${BASE.member}/members/search`, { keyword: kw, page: 1, page_size: 800, media_public_base: BASE.member }, authCfg);
+      if (!isRecruiterUser) {
+        const recReq = axios.post(`${BASE.recruiter}/recruiters/search`, { keyword: kw, page: 1, page_size: 100 }, authCfg);
+        const [memRes, recRes] = await Promise.allSettled([memberReq, recReq]);
+        if (memRes.status === 'fulfilled') {
+          setSearchResults(memRes.value.data?.data?.items || []);
+        } else {
+          setSearchResults([]);
+          toast.error(memRes.reason?.response?.data?.error?.message || 'Member search failed');
+        }
+        if (recRes.status === 'fulfilled') {
+          setRecruiterSearchResults(recRes.value.data?.data?.items || []);
+        } else {
+          setRecruiterSearchResults([]);
+        }
+      } else {
+        const { data } = await memberReq;
+        setSearchResults(data?.data?.items || []);
+      }
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Search failed');
     } finally {
@@ -133,10 +168,11 @@ export default function ConnectionsPage() {
     }
   };
 
-  const connect = async (memberId, firstName) => {
+  const connect = async (receiverId, displayName) => {
+    const first = (displayName || 'there').split(/\s+/)[0] || 'there';
     try {
-      await axios.post(`${BASE.messaging}/connections/request`, { requester_id: currentId, receiver_id: memberId, message: `Hi ${firstName}, I would like to connect!` }, authCfg);
-      toast.success(`Request sent to ${firstName || 'user'}!`);
+      await axios.post(`${BASE.messaging}/connections/request`, { requester_id: currentId, receiver_id: receiverId, message: `Hi ${first}, I would like to connect!` }, authCfg);
+      toast.success(`Request sent to ${displayName || 'user'}!`);
       loadPendingSent();
     } catch (err) {
       const msg = err.response?.data?.error?.message || '';
@@ -149,6 +185,16 @@ export default function ConnectionsPage() {
     }
   };
 
+  const removeConnection = async (otherUserId) => {
+    try {
+      await axios.post(`${BASE.messaging}/connections/remove`, { other_user_id: otherUserId }, authCfg);
+      toast.success('Connection removed');
+      loadAll();
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to remove connection');
+    }
+  };
+
   return (
     <div style={{ maxWidth: 920, margin: '0 auto' }}>
       <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>My Network</h1>
@@ -158,7 +204,7 @@ export default function ConnectionsPage() {
 
       <div style={S.card}>
         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Find people to connect with</h3>
-        <div style={{ display: 'flex', gap: 10, marginBottom: filteredSearchResults.length > 0 ? 16 : 0 }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: totalSearchHits > 0 ? 16 : 0 }}>
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -166,44 +212,101 @@ export default function ConnectionsPage() {
             style={S.input}
             onKeyDown={(e) => e.key === 'Enter' && searchPeople()}
           />
-          <button onClick={searchPeople} disabled={searching || !searchQuery.trim()} style={S.searchBtn}>{searching ? 'Searching…' : 'Search'}</button>
+          <button type="button" onClick={searchPeople} disabled={searching || !searchQuery.trim()} style={S.searchBtn}>{searching ? 'Searching…' : 'Search'}</button>
         </div>
 
-        {filteredSearchResults.length > 0 && (
+        {totalSearchHits > 0 && (
           <div>
-            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.45)', marginBottom: 12 }}>{filteredSearchResults.length} people found</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 10 }}>
-              {filteredSearchResults.map((m) => {
-                const alreadySent = sentReceiverIds.has(m.member_id);
-                const alreadyConnected = connectedIds.has(m.member_id);
-                const pendingReq = pendingSent.find((req) => req.receiver_id === m.member_id);
-                const initials = `${(m.first_name || '?')[0] || '?'}${(m.last_name || '')[0] || ''}`.toUpperCase();
-                return (
-                  <div key={m.member_id} style={S.personCard}>
-                    <Link to={`/profile/${m.member_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                      <div style={S.personAvatar}>{m.profile_photo_url ? <img src={m.profile_photo_url} alt="" style={S.avatarImg} /> : initials}</div>
-                    </Link>
-                    <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-                      <Link to={`/profile/${m.member_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                        <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`${m.first_name || ''} ${m.last_name || ''}`.trim() || m.member_id}</p>
-                      </Link>
-                      <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 4 }}>{m.headline || [m.current_title, m.current_company].filter(Boolean).join(' · ') || 'LinkedIn Member'}</p>
-                      {m.city && <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginBottom: 8 }}>📍 {m.city}</p>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                      <Link to={`/profile/${m.member_id}`}><button style={S.secondaryBtn}>View</button></Link>
-                      {alreadyConnected ? (
-                        <span style={S.sentChip}>Connected</span>
-                      ) : alreadySent ? (
-                        <button onClick={() => withdrawRequest(pendingReq?.request_id)} style={S.withdrawBtn}>Withdraw</button>
-                      ) : (
-                        <button onClick={() => connect(m.member_id, m.first_name)} style={S.connectBtn}>+ Connect</button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.45)', marginBottom: 12 }}>{totalSearchHits} people found</p>
+            {filteredSearchResults.length > 0 && (
+              <>
+                {!isRecruiterUser && <p style={{ fontSize: 12, fontWeight: 700, color: 'rgba(0,0,0,0.5)', marginBottom: 8 }}>Members</p>}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 10, marginBottom: filteredRecruiterResults.length > 0 ? 16 : 0 }}>
+                  {filteredSearchResults.map((m) => {
+                    const alreadySent = sentReceiverIds.has(m.member_id);
+                    const alreadyConnected = connectedIds.has(m.member_id);
+                    const pendingReq = pendingSent.find((req) => req.receiver_id === m.member_id);
+                    const initials = `${(m.first_name || '?')[0] || '?'}${(m.last_name || '')[0] || ''}`.toUpperCase();
+                    const name = `${m.first_name || ''} ${m.last_name || ''}`.trim() || m.member_id;
+                    return (
+                      <div key={m.member_id} style={S.personCard}>
+                        <Link to={`/profile/${m.member_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                          <div style={S.personAvatar}>{m.profile_photo_url ? <img src={m.profile_photo_url} alt="" style={S.avatarImg} /> : initials}</div>
+                        </Link>
+                        <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                          <Link to={`/profile/${m.member_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                            <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</p>
+                          </Link>
+                          <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 4 }}>{m.headline || [m.current_title, m.current_company].filter(Boolean).join(' · ') || 'LinkedIn Member'}</p>
+                          {m.city && <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginBottom: 8 }}>📍 {m.city}</p>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                          <Link to={`/profile/${m.member_id}`}><button type="button" style={S.secondaryBtn}>View</button></Link>
+                          <Link to={`/messages?user=${encodeURIComponent(m.member_id)}`}>
+                            <button type="button" style={S.messageBtn}>Message</button>
+                          </Link>
+                          {alreadyConnected ? (
+                            <>
+                              <span style={S.sentChip}>Connected</span>
+                              <button type="button" onClick={() => removeConnection(m.member_id)} style={S.withdrawBtn}>Remove</button>
+                            </>
+                          ) : alreadySent ? (
+                            <button type="button" onClick={() => withdrawRequest(pendingReq?.request_id)} style={S.withdrawBtn}>Withdraw</button>
+                          ) : (
+                            <button type="button" onClick={() => connect(m.member_id, name)} style={S.connectBtn}>+ Connect</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            {filteredRecruiterResults.length > 0 && (
+              <>
+                <p style={{ fontSize: 12, fontWeight: 700, color: 'rgba(0,0,0,0.5)', marginBottom: 8 }}>Recruiters</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 10 }}>
+                  {filteredRecruiterResults.map((r) => {
+                    const rid = r.recruiter_id;
+                    const alreadySent = sentReceiverIds.has(rid);
+                    const alreadyConnected = connectedIds.has(rid);
+                    const pendingReq = pendingSent.find((req) => req.receiver_id === rid);
+                    const name = r.name || rid;
+                    const sub = [r.headline, r.company_name].filter(Boolean).join(' · ') || 'Recruiter';
+                    const initials = (name || '?')[0].toUpperCase();
+                    return (
+                      <div key={rid} style={S.personCard}>
+                        <Link to={`/profile/${rid}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                          <div style={S.personAvatar}>{r.profile_photo_url ? <img src={r.profile_photo_url} alt="" style={S.avatarImg} /> : initials}</div>
+                        </Link>
+                        <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                          <Link to={`/profile/${rid}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                            <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</p>
+                          </Link>
+                          <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 4 }}>{sub}</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                          <Link to={`/profile/${rid}`}><button type="button" style={S.secondaryBtn}>View</button></Link>
+                          <Link to={`/messages?user=${encodeURIComponent(rid)}`}>
+                            <button type="button" style={S.messageBtn}>Message</button>
+                          </Link>
+                          {alreadyConnected ? (
+                            <>
+                              <span style={S.sentChip}>Connected</span>
+                              <button type="button" onClick={() => removeConnection(rid)} style={S.withdrawBtn}>Remove</button>
+                            </>
+                          ) : alreadySent ? (
+                            <button type="button" onClick={() => withdrawRequest(pendingReq?.request_id)} style={S.withdrawBtn}>Withdraw</button>
+                          ) : (
+                            <button type="button" onClick={() => connect(rid, name)} style={S.connectBtn}>+ Connect</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -276,7 +379,10 @@ export default function ConnectionsPage() {
                     <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.55)' }}>{conn.headline || 'LinkedIn Member'}</p>
                     <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.42)' }}>{mutualCounts[otherId] || 0} mutual connections</p>
                   </div>
-                  <Link to={`/messages?user=${encodeURIComponent(otherId)}`}><button style={S.secondaryBtn}>Message</button></Link>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <Link to={`/messages?user=${encodeURIComponent(otherId)}`}><button type="button" style={S.secondaryBtn}>Message</button></Link>
+                    <button type="button" onClick={() => removeConnection(otherId)} style={S.withdrawBtn}>Remove</button>
+                  </div>
                 </div>
               );
             })}
@@ -297,6 +403,7 @@ const S = {
   avatarImg: { width: '100%', height: '100%', objectFit: 'cover' },
   secondaryBtn: { padding: '8px 14px', background: '#fff', color: '#0a66c2', border: '1px solid #0a66c2', borderRadius: 999, fontWeight: 700, cursor: 'pointer' },
   connectBtn: { padding: '8px 14px', background: '#0a66c2', color: '#fff', border: 'none', borderRadius: 999, fontWeight: 700, cursor: 'pointer' },
+  messageBtn: { padding: '8px 14px', background: '#fff', color: '#0a66c2', border: '1px solid #0a66c2', borderRadius: 999, fontWeight: 700, cursor: 'pointer' },
   withdrawBtn: { padding: '8px 14px', background: '#fff', color: '#b42318', border: '1px solid #b42318', borderRadius: 999, fontWeight: 700, cursor: 'pointer' },
   sentChip: { padding: '8px 12px', background: '#e8f3ff', color: '#0a66c2', borderRadius: 999, fontWeight: 700, fontSize: 13 },
   requestRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' },

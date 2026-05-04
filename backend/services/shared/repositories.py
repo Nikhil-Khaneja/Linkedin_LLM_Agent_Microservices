@@ -9,7 +9,7 @@ from uuid import uuid4
 from typing import Any
 
 from services.shared.relational import fetch_one, fetch_all, execute, execute_many
-from services.shared.document_store import find_one, find_many, insert_one, replace_one, update_one
+from services.shared.document_store import find_one, find_many, insert_one, replace_one, update_one, delete_many
 
 
 def now_iso() -> str:
@@ -322,6 +322,46 @@ class RecruiterRepository:
                 "payload_json": _to_json(company),
             })
         return self.get_recruiter(recruiter_id)
+
+    def search_recruiters(self, keyword: str, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        kw = (keyword or "").strip().lower()
+        if not kw:
+            return []
+        like = f"%{kw}%"
+        lim = max(1, min(int(limit), 500))
+        off = max(0, int(offset))
+        rows = fetch_all(
+            """
+            SELECT r.recruiter_id, r.name, r.email, r.access_level, r.payload_json,
+                   c.company_name AS company_name, c.company_industry AS company_industry
+            FROM recruiters r
+            LEFT JOIN companies c ON r.company_id = c.company_id
+            WHERE lower(COALESCE(r.name, '')) LIKE :like
+               OR lower(COALESCE(r.email, '')) LIKE :like
+               OR lower(COALESCE(c.company_name, '')) LIKE :like
+               OR lower(COALESCE(r.access_level, '')) LIKE :like
+            ORDER BY r.name ASC
+            LIMIT :lim OFFSET :off
+            """,
+            {"like": like, "lim": lim, "off": off},
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows or []:
+            payload = _from_json(row.get("payload_json"), {})
+            rid = row.get("recruiter_id")
+            if not rid:
+                continue
+            company_name = row.get("company_name") or payload.get("company_name") or ""
+            out.append({
+                "recruiter_id": rid,
+                "name": row.get("name") or payload.get("name") or "",
+                "email": row.get("email") or payload.get("email") or "",
+                "headline": payload.get("headline") or row.get("access_level") or "Recruiter",
+                "company_name": company_name,
+                "company_industry": row.get("company_industry") or payload.get("company_industry") or "",
+                "profile_photo_url": payload.get("profile_photo_url") or "",
+            })
+        return out
 
 
 class JobRepository:
@@ -699,6 +739,10 @@ class MessagingRepository:
     def list_connections(self, user_id: str) -> list[dict[str, Any]]:
         return [c for c in find_many("connections") if user_id in {c.get("user_a"), c.get("user_b")}]
 
+    def delete_connection_between(self, user_a: str, user_b: str) -> int:
+        pair_key = "|".join(sorted([user_a, user_b]))
+        return delete_many("connections", {"pair_key": pair_key})
+
 
 class AnalyticsRepository:
     def event_exists(self, idempotency_key: str) -> bool:
@@ -763,9 +807,6 @@ class AIRepository:
         replace_one("ai_tasks", {"task_id": task["task_id"]}, task, upsert=True)
 
 from services.shared.relational import cursor_ctx, _adapt_sql, _params_for_query
-from services.shared.document_store import delete_many
-
-
 def _sql_insert_ignore(query_sqlite: str, query_mysql: str | None = None) -> str:
     """Return the MySQL variant for INSERT IGNORE style statements."""
     return query_mysql or query_sqlite.replace('INSERT OR IGNORE INTO', 'INSERT IGNORE INTO')
