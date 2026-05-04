@@ -163,7 +163,8 @@ jobs:
           _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
           REG="$(_trim "${{ steps.login-ecr.outputs.registry }}")"
           TAG="${{ steps.meta.outputs.tag }}"
-          HOST="${APP_HOST}"
+          # APP_HOST may be "domain,elastic-ip" for CORS; use first segment for baked REACT_APP_* URLs.
+          HOST="$(_trim "${APP_HOST%%,*}")"
           FRONT="${ECR_FRONTEND_REPOSITORY}"
           MYSQLR="${ECR_MYSQL_REPOSITORY}"
           MONGOR="${ECR_MONGO_REPOSITORY}"

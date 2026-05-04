@@ -139,7 +139,11 @@ def _add_host_ports(container: dict) -> None:
 
 def _rewrite_app_env(container: dict) -> None:
     ip = os.environ["ECS_HOST_PRIVATE_IP"]
-    pub = os.environ["APP_HOST"]
+    # APP_HOST may be comma-separated: canonical hostname first, then Elastic IP, etc.
+    # CORS must list every origin users type in the browser (domain vs raw IP).
+    pub_raw = (os.environ.get("APP_HOST") or "").strip()
+    pub_hosts = [x.strip() for x in pub_raw.split(",") if x.strip()]
+    pub = pub_hosts[0] if pub_hosts else pub_raw
     for e in container.get("environment") or []:
         n = e.get("name")
         v = e.get("value", "")
@@ -163,15 +167,15 @@ def _rewrite_app_env(container: dict) -> None:
             e["value"] = f"http://{ip}:8006"
         elif n == "PUBLIC_BASE_URL":
             e["value"] = f"http://{pub}"
-    # Browser Origin on ECS is http://<APP_HOST> (default port 80). FastAPI CORS must allow it.
+    # Browser Origin must match an entry here (include domain and Elastic IP if both are used).
     env_list = container.setdefault("environment", [])
     names = {e.get("name") for e in env_list}
     if "CORS_ALLOWED_ORIGINS" not in names:
-        p = pub.strip()
-        if p:
-            env_list.append(
-                {"name": "CORS_ALLOWED_ORIGINS", "value": f"http://{p},http://{p}:80"}
-            )
+        cors: list[str] = []
+        for h in pub_hosts or ([pub_raw] if pub_raw else []):
+            cors.extend((f"http://{h}", f"http://{h}:80"))
+        if cors:
+            env_list.append({"name": "CORS_ALLOWED_ORIGINS", "value": ",".join(cors)})
 
 
 def _strip_cross_task_fields(container: dict) -> None:
