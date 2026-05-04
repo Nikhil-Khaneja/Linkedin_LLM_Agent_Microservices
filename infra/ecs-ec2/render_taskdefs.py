@@ -161,6 +161,15 @@ def _rewrite_app_env(container: dict) -> None:
             e["value"] = f"http://{ip}:8006"
         elif n == "PUBLIC_BASE_URL":
             e["value"] = f"http://{pub}"
+    # Browser Origin on ECS is http://<APP_HOST> (default port 80). FastAPI CORS must allow it.
+    env_list = container.setdefault("environment", [])
+    names = {e.get("name") for e in env_list}
+    if "CORS_ALLOWED_ORIGINS" not in names:
+        p = pub.strip()
+        if p:
+            env_list.append(
+                {"name": "CORS_ALLOWED_ORIGINS", "value": f"http://{p},http://{p}:80"}
+            )
 
 
 def _strip_cross_task_fields(container: dict) -> None:
