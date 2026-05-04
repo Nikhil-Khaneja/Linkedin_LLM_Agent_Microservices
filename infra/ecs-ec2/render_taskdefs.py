@@ -86,6 +86,8 @@ def _backend_image_env_key(container_name: str) -> str:
 
 def _backend_image_for(container_name: str) -> str:
     """ECR URI for one Python service. Set per-service env vars, or legacy BACKEND_IMAGE for all."""
+    if container_name == "frontend":
+        return (os.environ.get("FRONTEND_IMAGE") or "").strip()
     single = (os.environ.get("BACKEND_IMAGE") or "").strip()
     if single:
         return single
