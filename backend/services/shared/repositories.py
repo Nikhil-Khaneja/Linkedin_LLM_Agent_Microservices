@@ -1043,18 +1043,6 @@ def _jobrepo_search_impl(self):
     return _jobs_sql_rows_to_items(rows)
 
 
-def _jobs_table_row_estimate() -> int:
-    """InnoDB row estimate from stats (fast). Used to avoid COUNT(*) scans on huge unfiltered job tables."""
-    row = fetch_one(
-        "SELECT TABLE_ROWS AS n FROM information_schema.TABLES "
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'jobs' LIMIT 1"
-    )
-    try:
-        return max(0, int((row or {}).get('n') or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
 def _search_tokens(s: str) -> str:
     parts = re.findall(r'[a-zA-Z0-9]+', (s or '').lower())[:16]
     return ' '.join(parts)
@@ -1171,12 +1159,9 @@ def _jobrepo_search_jobs_paginated_impl(
 
     count_cached = False
     if unfiltered:
-        est = _jobs_table_row_estimate()
-        if est > 0:
-            total = est
-        else:
-            cnt_row = fetch_one('SELECT COUNT(*) AS cnt FROM jobs', {})
-            total = int((cnt_row or {}).get('cnt') or 0)
+        # Accurate total for empty-filter job search (information_schema.TABLE_ROWS is often stale after bulk loads).
+        cnt_row = fetch_one('SELECT COUNT(*) AS cnt FROM jobs', {})
+        total = int((cnt_row or {}).get('cnt') or 0)
     else:
         count_sig = hashlib.sha256(
             json.dumps({'where': where_sql, 'join': join_sql, 'p': params}, sort_keys=True, default=str).encode()

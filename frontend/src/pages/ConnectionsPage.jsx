@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import { normalizeMemberMediaUrl } from '../utils/memberMediaUrl';
 import toast from 'react-hot-toast';
 
 export default function ConnectionsPage() {
@@ -231,7 +232,7 @@ export default function ConnectionsPage() {
                     return (
                       <div key={m.member_id} style={S.personCard}>
                         <Link to={`/profile/${m.member_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                          <div style={S.personAvatar}>{m.profile_photo_url ? <img src={m.profile_photo_url} alt="" style={S.avatarImg} /> : initials}</div>
+                          <div style={S.personAvatar}>{m.profile_photo_url ? <img src={normalizeMemberMediaUrl(m.profile_photo_url)} alt="" style={S.avatarImg} /> : initials}</div>
                         </Link>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
                           <Link to={`/profile/${m.member_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
@@ -277,7 +278,7 @@ export default function ConnectionsPage() {
                     return (
                       <div key={rid} style={S.personCard}>
                         <Link to={`/profile/${rid}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                          <div style={S.personAvatar}>{r.profile_photo_url ? <img src={r.profile_photo_url} alt="" style={S.avatarImg} /> : initials}</div>
+                          <div style={S.personAvatar}>{r.profile_photo_url ? <img src={normalizeMemberMediaUrl(r.profile_photo_url)} alt="" style={S.avatarImg} /> : initials}</div>
                         </Link>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
                           <Link to={`/profile/${rid}`} style={{ textDecoration: 'none', color: 'inherit' }}>
@@ -318,7 +319,7 @@ export default function ConnectionsPage() {
             {pendingIncoming.map((req) => (
               <div key={req.request_id} style={S.requestRow}>
                 <Link to={`/profile/${req.requester_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={S.bigAvatar}>{req.profile_photo_url ? <img src={req.profile_photo_url} alt="" style={S.avatarImg} /> : (req.first_name || req.requester_id || 'U')[0].toUpperCase()}</div>
+                  <div style={S.bigAvatar}>{req.profile_photo_url ? <img src={normalizeMemberMediaUrl(req.profile_photo_url)} alt="" style={S.avatarImg} /> : (req.first_name || req.requester_id || 'U')[0].toUpperCase()}</div>
                 </Link>
                 <div style={{ flex: 1 }}>
                   <Link to={`/profile/${req.requester_id}`} style={{ textDecoration: 'none', color: 'inherit' }}><p style={{ fontSize: 15, fontWeight: 700 }}>{req.first_name ? `${req.first_name} ${req.last_name || ''}` : req.requester_id}</p></Link>
@@ -339,7 +340,7 @@ export default function ConnectionsPage() {
             {pendingSent.map((req) => (
               <div key={req.request_id} style={S.requestRow}>
                 <Link to={`/profile/${req.receiver_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={S.bigAvatar}>{req.profile_photo_url ? <img src={req.profile_photo_url} alt="" style={S.avatarImg} /> : (req.first_name || req.receiver_id || 'U')[0].toUpperCase()}</div>
+                  <div style={S.bigAvatar}>{req.profile_photo_url ? <img src={normalizeMemberMediaUrl(req.profile_photo_url)} alt="" style={S.avatarImg} /> : (req.first_name || req.receiver_id || 'U')[0].toUpperCase()}</div>
                 </Link>
                 <div style={{ flex: 1 }}>
                   <Link to={`/profile/${req.receiver_id}`} style={{ textDecoration: 'none', color: 'inherit' }}><p style={{ fontSize: 15, fontWeight: 700 }}>{req.first_name ? `${req.first_name} ${req.last_name || ''}` : req.receiver_id}</p></Link>
@@ -370,7 +371,7 @@ export default function ConnectionsPage() {
               return (
                 <div key={conn.connection_id} style={{ ...S.card, display: 'flex', alignItems: 'center', gap: 14 }}>
                   <Link to={`/profile/${otherId}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                    <div style={S.bigAvatar}>{conn.profile_photo_url ? <img src={conn.profile_photo_url} alt="" style={S.avatarImg} /> : initials}</div>
+                    <div style={S.bigAvatar}>{conn.profile_photo_url ? <img src={normalizeMemberMediaUrl(conn.profile_photo_url)} alt="" style={S.avatarImg} /> : initials}</div>
                   </Link>
                   <div style={{ flex: 1 }}>
                     <Link to={`/profile/${otherId}`} style={{ textDecoration: 'none', color: 'inherit' }}>

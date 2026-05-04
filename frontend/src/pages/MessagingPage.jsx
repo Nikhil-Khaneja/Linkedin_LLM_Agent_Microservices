@@ -4,6 +4,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import { normalizeMemberMediaUrl } from '../utils/memberMediaUrl';
 
 export default function MessagingPage() {
   const { user } = useAuth();
@@ -363,7 +364,7 @@ export default function MessagingPage() {
             <p style={{ padding: 24, color: 'rgba(0,0,0,0.45)', fontSize: 14, textAlign: 'center' }}>No conversations yet</p>
           ) : threads.map((thread) => (
             <div key={thread.thread_id} onClick={() => openThread(thread)} style={{ ...S.threadItem, background: active?.thread_id === thread.thread_id ? '#eef3f8' : 'transparent' }}>
-              <div style={S.threadAvatar}>{thread.other_profile_photo_url ? <img src={thread.other_profile_photo_url} alt="" style={S.avatarImg} /> : (thread.other_display_name || '?')[0]}</div>
+              <div style={S.threadAvatar}>{thread.other_profile_photo_url ? <img src={normalizeMemberMediaUrl(thread.other_profile_photo_url)} alt="" style={S.avatarImg} /> : (thread.other_display_name || '?')[0]}</div>
               <div style={{ minWidth: 0 }}>
                 <p style={S.threadTitle}>{thread.other_display_name || thread.other_participant || `Thread ${thread.thread_id}`}</p>
                 <p style={S.threadSubtitle}>{thread.other_headline || (thread.latest_message_at ? new Date(thread.latest_message_at).toLocaleString() : '')}</p>

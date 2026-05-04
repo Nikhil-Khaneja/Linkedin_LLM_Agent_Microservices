@@ -54,7 +54,7 @@ def clients():
         os.environ['MONGO_URI'] = os.environ['MONGO_URL']
         try:
             import services.shared.notifications as _notif
-            _notif._CLIENT = None
+            _notif._client = None
         except Exception:
             pass
         try:
