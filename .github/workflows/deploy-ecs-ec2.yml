@@ -132,20 +132,30 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
+          # Strip CR/LF/trim — hidden newlines in GitHub repo variables split $GITHUB_OUTPUT and cause
+          # "Invalid format ':<sha>'" (a second line with no key=).
+          _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
           IMAGE_TAG="${GITHUB_SHA}"
-          REG="${{ steps.login-ecr.outputs.registry }}"
+          REG="$(_trim "${{ steps.login-ecr.outputs.registry }}")"
+          FRONT="$(_trim "${{ vars.ECR_FRONTEND_REPOSITORY }}")"
+          MYSQLR="$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
+          MONGOR="$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
           echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "frontend=${REG}/${{ vars.ECR_FRONTEND_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "mysql=${REG}/${{ vars.ECR_MYSQL_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "mongo=${REG}/${{ vars.ECR_MONGO_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${REG}/${FRONT}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "mysql=${REG}/${MYSQLR}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "mongo=${REG}/${MONGOR}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push images
         if: steps.pick.outputs.selection != ''
         run: |
           set -euo pipefail
-          REG="${{ steps.login-ecr.outputs.registry }}"
+          _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+          REG="$(_trim "${{ steps.login-ecr.outputs.registry }}")"
           TAG="${{ steps.meta.outputs.tag }}"
-          HOST="${{ vars.APP_HOST }}"
+          HOST="$(_trim "${{ vars.APP_HOST }}")"
+          FRONT="$(_trim "${{ vars.ECR_FRONTEND_REPOSITORY }}")"
+          MYSQLR="$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
+          MONGOR="$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
           for target in auth_service recruiter_company_service member_profile_service jobs_service applications_service messaging_connections_service analytics_service ai_orchestrator_service; do
             docker build --target "$target" -t "${REG}/linkedin-sim/${target}:${TAG}" ./backend
             docker push "${REG}/linkedin-sim/${target}:${TAG}"
@@ -166,9 +176,9 @@ jobs:
           docker build -f infra/ecs-ec2/Dockerfile.mongo -t "${{ steps.meta.outputs.mongo }}" .
           docker push "${{ steps.meta.outputs.mongo }}"
           {
-            echo "FRONTEND_IMAGE=${REG}/${{ vars.ECR_FRONTEND_REPOSITORY }}:${TAG}"
-            echo "MYSQL_IMAGE=${REG}/${{ vars.ECR_MYSQL_REPOSITORY }}:${TAG}"
-            echo "MONGO_IMAGE=${REG}/${{ vars.ECR_MONGO_REPOSITORY }}:${TAG}"
+            echo "FRONTEND_IMAGE=${REG}/${FRONT}:${TAG}"
+            echo "MYSQL_IMAGE=${REG}/${MYSQLR}:${TAG}"
+            echo "MONGO_IMAGE=${REG}/${MONGOR}:${TAG}"
             echo "BACKEND_IMAGE_AUTH_SERVICE=${REG}/linkedin-sim/auth_service:${TAG}"
             echo "BACKEND_IMAGE_RECRUITER_COMPANY_SERVICE=${REG}/linkedin-sim/recruiter_company_service:${TAG}"
             echo "BACKEND_IMAGE_MEMBER_PROFILE_SERVICE=${REG}/linkedin-sim/member_profile_service:${TAG}"
