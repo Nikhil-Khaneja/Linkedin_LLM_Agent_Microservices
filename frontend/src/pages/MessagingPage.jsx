@@ -7,13 +7,16 @@ import { useAuth } from '../context/AuthContext';
 
 export default function MessagingPage() {
   const { user } = useAuth();
-  const currentId = user?.principalId || user?.userId;
+  const currentId = user?.userId || user?.principalId;
   const [threads, setThreads] = useState([]);
   const [active, setActive] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [connections, setConnections] = useState([]);
   const [newUserId, setNewUserId] = useState('');
+  const [connectionSearch, setConnectionSearch] = useState([]);
+  const [searchingConnections, setSearchingConnections] = useState(false);
   const bottomRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const targetUserId = searchParams.get('user') || '';
@@ -25,6 +28,7 @@ export default function MessagingPage() {
   useEffect(() => {
     if (!currentId || !token) return;
     loadThreads();
+    loadConnections();
   }, [currentId, token, targetUserId, targetThreadId]);
 
   useEffect(() => {
@@ -96,6 +100,26 @@ export default function MessagingPage() {
     const preview = await resolveUserPreview(item.other_participant);
     return { ...item, ...preview };
   }));
+
+  const displayConnectionName = (conn) => {
+    if (!conn) return '';
+    const combined = [conn.first_name, conn.last_name].filter(Boolean).join(' ').trim();
+    return combined || conn.display_name || conn.other_display_name || conn.other_user_id || conn.user_id || '';
+  };
+
+  const normalizeConnectionUserId = (conn) => conn?.other_user_id || conn?.user_id || conn?.member_id || '';
+
+  const loadConnections = async () => {
+    try {
+      const { data } = await axios.post(`${BASE.messaging}/connections/list`, { user_id: currentId }, authCfg);
+      const items = Array.isArray(data?.data?.items) ? data.data.items : [];
+      setConnections(items);
+      setConnectionSearch(items.slice(0, 12));
+    } catch {
+      setConnections([]);
+      setConnectionSearch([]);
+    }
+  };
 
   const loadThreads = async (resolveTarget = true) => {
     try {
@@ -210,15 +234,95 @@ export default function MessagingPage() {
     }
   };
 
+  const searchConnections = () => {
+    const q = newUserId.trim().toLowerCase();
+    if (!q) {
+      setConnectionSearch(connections.slice(0, 12));
+      return;
+    }
+    setSearchingConnections(true);
+    const filtered = connections.filter((conn) => {
+      const hay = [
+        displayConnectionName(conn),
+        conn?.headline || '',
+        normalizeConnectionUserId(conn),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+    setConnectionSearch(filtered);
+    setSearchingConnections(false);
+  };
+
+  const getFilteredConnections = () => {
+    const q = newUserId.trim().toLowerCase();
+    if (!q) return connections.slice(0, 12);
+    return connections.filter((conn) => {
+      const hay = [
+        displayConnectionName(conn),
+        conn?.headline || '',
+        normalizeConnectionUserId(conn),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  };
+
   return (
     <div style={S.page}>
       <div style={S.sidebar}>
         <div style={S.sideHeader}><h2 style={{ fontSize: 20, fontWeight: 600 }}>Messaging</h2></div>
         <div style={S.newMsg}>
-          <input value={newUserId} onChange={(e) => setNewUserId(e.target.value)} placeholder="Enter user ID…" style={S.newInput} />
-          <button onClick={() => createOrOpenThread(newUserId, true)} style={S.newBtn}>+</button>
+          <input
+            value={newUserId}
+            onChange={(e) => setNewUserId(e.target.value)}
+            placeholder="Search connections..."
+            style={S.newInput}
+            onKeyDown={(e) => e.key === 'Enter' && searchConnections()}
+          />
+          <button onClick={searchConnections} style={S.searchBtn}>🔍</button>
+          <button
+            onClick={() => {
+              const filtered = getFilteredConnections();
+              setConnectionSearch(filtered);
+              const first = filtered[0];
+              const userId = normalizeConnectionUserId(first);
+              if (!userId) return;
+              createOrOpenThread(userId, false);
+            }}
+            style={S.newBtn}
+            title="Start chat with first search result"
+          >
+            +
+          </button>
         </div>
-        <div style={{ overflowY: 'auto', flex: 1 }}>
+        <div style={S.connectionResults}>
+          {newUserId.trim().length > 0 && (
+            <>
+              <p style={S.connectionResultMeta}>
+                {searchingConnections ? 'Searching...' : `${connectionSearch.length} connection${connectionSearch.length === 1 ? '' : 's'} found`}
+              </p>
+              {connectionSearch.slice(0, 6).map((conn) => {
+                const userId = normalizeConnectionUserId(conn);
+                if (!userId) return null;
+                return (
+                  <button
+                    type="button"
+                    key={`conn-${userId}`}
+                    onClick={() => createOrOpenThread(userId, true)}
+                    style={S.connectionResultBtn}
+                  >
+                    <span style={S.connectionResultName}>{displayConnectionName(conn) || userId}</span>
+                    <span style={S.connectionResultSub}>{conn?.headline || userId}</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </div>
+        <div style={S.threadList}>
           {threads.length === 0 ? (
             <p style={{ padding: 24, color: 'rgba(0,0,0,0.45)', fontSize: 14, textAlign: 'center' }}>No conversations yet</p>
           ) : threads.map((thread) => (
@@ -277,12 +381,19 @@ export default function MessagingPage() {
 }
 
 const S = {
-  page: { display: 'grid', gridTemplateColumns: '320px 1fr', height: 'calc(100vh - 100px)', background: '#fff', borderRadius: 8, boxShadow: '0 0 0 1px rgba(0,0,0,0.08)', overflow: 'hidden' },
+  page: { display: 'grid', gridTemplateColumns: '320px 1fr', height: 'calc(100vh - 130px)', minHeight: 520, background: '#fff', borderRadius: 8, boxShadow: '0 0 0 1px rgba(0,0,0,0.08)', overflow: 'hidden' },
   sidebar: { borderRight: '1px solid rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column' },
   sideHeader: { padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.08)' },
   newMsg: { padding: '10px 16px', display: 'flex', gap: 8, borderBottom: '1px solid rgba(0,0,0,0.08)' },
   newInput: { flex: 1, padding: '8px 12px', border: '1px solid rgba(0,0,0,0.3)', borderRadius: 4, fontSize: 14, outline: 'none', fontFamily: 'inherit' },
+  searchBtn: { width: 36, height: 36, background: '#fff', color: '#0a66c2', border: '1px solid rgba(10,102,194,0.6)', borderRadius: '50%', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   newBtn: { width: 36, height: 36, background: '#0a66c2', color: '#fff', border: 'none', borderRadius: '50%', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  connectionResults: { maxHeight: 190, overflowY: 'auto', borderBottom: '1px solid rgba(0,0,0,0.08)' },
+  connectionResultMeta: { padding: '8px 16px 4px', fontSize: 12, color: 'rgba(0,0,0,0.5)' },
+  connectionResultBtn: { width: '100%', border: 'none', background: '#fff', textAlign: 'left', padding: '8px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(0,0,0,0.04)' },
+  connectionResultName: { fontSize: 13, fontWeight: 700, color: 'rgba(0,0,0,0.85)' },
+  connectionResultSub: { fontSize: 12, color: 'rgba(0,0,0,0.55)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  threadList: { overflowY: 'auto', flex: 1, minHeight: 0 },
   threadItem: { display: 'flex', gap: 12, padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid rgba(0,0,0,0.06)', alignItems: 'center' },
   threadAvatar: { width: 40, height: 40, borderRadius: '50%', background: '#0a66c2', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, overflow: 'hidden', fontWeight: 700 },
   avatarImg: { width: '100%', height: '100%', objectFit: 'cover' },

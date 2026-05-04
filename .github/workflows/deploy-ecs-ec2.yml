@@ -36,6 +36,8 @@ jobs:
             echo "ECR_MYSQL_REPOSITORY=$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
             echo "ECR_MONGO_REPOSITORY=$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
           } >> "$GITHUB_ENV"
+          phs="$(_trim "${{ vars.PUBLIC_HTTP_SCHEME }}")"
+          if [[ -n "$phs" ]]; then echo "PUBLIC_HTTP_SCHEME=$phs" >> "$GITHUB_ENV"; fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -165,6 +167,9 @@ jobs:
           TAG="${{ steps.meta.outputs.tag }}"
           # APP_HOST may be "domain,elastic-ip" for CORS; use first segment for baked REACT_APP_* URLs.
           HOST="$(_trim "${APP_HOST%%,*}")"
+          SCHEME="${PUBLIC_HTTP_SCHEME:-http}"
+          SCHEME="$(_trim "$SCHEME")"
+          [[ -z "$SCHEME" ]] && SCHEME=http
           FRONT="${ECR_FRONTEND_REPOSITORY}"
           MYSQLR="${ECR_MYSQL_REPOSITORY}"
           MONGOR="${ECR_MONGO_REPOSITORY}"
@@ -175,14 +180,14 @@ jobs:
           # REACT_APP_* ports must match ecs-taskdef.template.json hostPort per service and
           # frontend/src/config/api.js fallbacks (8001–8008). Platform host ports come from render_taskdefs.HOST_PORTS.
           docker build \
-            --build-arg "REACT_APP_AUTH_URL=http://${HOST}:8001" \
-            --build-arg "REACT_APP_MEMBER_URL=http://${HOST}:8002" \
-            --build-arg "REACT_APP_RECRUITER_URL=http://${HOST}:8003" \
-            --build-arg "REACT_APP_JOB_URL=http://${HOST}:8004" \
-            --build-arg "REACT_APP_APP_URL=http://${HOST}:8005" \
-            --build-arg "REACT_APP_MSG_URL=http://${HOST}:8006" \
-            --build-arg "REACT_APP_ANALYTICS_URL=http://${HOST}:8007" \
-            --build-arg "REACT_APP_AI_URL=http://${HOST}:8008" \
+            --build-arg "REACT_APP_AUTH_URL=${SCHEME}://${HOST}:8001" \
+            --build-arg "REACT_APP_MEMBER_URL=${SCHEME}://${HOST}:8002" \
+            --build-arg "REACT_APP_RECRUITER_URL=${SCHEME}://${HOST}:8003" \
+            --build-arg "REACT_APP_JOB_URL=${SCHEME}://${HOST}:8004" \
+            --build-arg "REACT_APP_APP_URL=${SCHEME}://${HOST}:8005" \
+            --build-arg "REACT_APP_MSG_URL=${SCHEME}://${HOST}:8006" \
+            --build-arg "REACT_APP_ANALYTICS_URL=${SCHEME}://${HOST}:8007" \
+            --build-arg "REACT_APP_AI_URL=${SCHEME}://${HOST}:8008" \
             -t "${{ steps.meta.outputs.frontend }}" ./frontend
           docker push "${{ steps.meta.outputs.frontend }}"
           docker build -f infra/ecs-ec2/Dockerfile.mysql -t "${{ steps.meta.outputs.mysql }}" .

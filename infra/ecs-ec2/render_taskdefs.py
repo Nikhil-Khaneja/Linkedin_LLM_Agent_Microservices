@@ -144,6 +144,9 @@ def _rewrite_app_env(container: dict) -> None:
     pub_raw = (os.environ.get("APP_HOST") or "").strip()
     pub_hosts = [x.strip() for x in pub_raw.split(",") if x.strip()]
     pub = pub_hosts[0] if pub_hosts else pub_raw
+    scheme = (os.environ.get("PUBLIC_HTTP_SCHEME") or "http").strip().lower()
+    if scheme not in ("http", "https"):
+        scheme = "http"
     for e in container.get("environment") or []:
         n = e.get("name")
         v = e.get("value", "")
@@ -162,18 +165,19 @@ def _rewrite_app_env(container: dict) -> None:
         elif n == "OWNER1_JWKS_URL":
             e["value"] = f"http://{ip}:8001/.well-known/jwks.json"
         elif n == "MEMBER_PUBLIC_URL":
-            e["value"] = f"http://{pub}:8002"
+            e["value"] = f"{scheme}://{pub}:8002"
         elif n == "MESSAGING_SERVICE_URL":
             e["value"] = f"http://{ip}:8006"
         elif n == "PUBLIC_BASE_URL":
-            e["value"] = f"http://{pub}"
+            e["value"] = f"{scheme}://{pub}"
     # Browser Origin must match an entry here (include domain and Elastic IP if both are used).
     env_list = container.setdefault("environment", [])
     names = {e.get("name") for e in env_list}
     if "CORS_ALLOWED_ORIGINS" not in names:
         cors: list[str] = []
         for h in pub_hosts or ([pub_raw] if pub_raw else []):
-            cors.extend((f"http://{h}", f"http://{h}:80"))
+            # http + https so TLS frontends (https://domain) still pass CORS to APIs on :8001–8008.
+            cors.extend((f"http://{h}", f"http://{h}:80", f"https://{h}"))
         if cors:
             env_list.append({"name": "CORS_ALLOWED_ORIGINS", "value": ",".join(cors)})
 

@@ -32,7 +32,7 @@ export default function Layout() {
   const photo   = localStorage.getItem(`photo_${user?.principalId || user?.userId}`);
   const token = localStorage.getItem('access_token');
   const authCfg = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
-  const currentId = user?.principalId || user?.userId;
+  const currentId = user?.userId || user?.principalId;
 
   const normalizeNotificationTarget = (notification) => {
     if (!notification) return '/notifications';
@@ -133,7 +133,6 @@ export default function Layout() {
     { to:'/connections', label:'Network',   icon:<NetIcon /> },
     { to:'/messages',    label:'Messaging', icon:<MsgIcon /> },
     { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
-    { to:'/performance', label:'Perf',      icon:<PerfIcon /> },
   ];
   const recruiterNav = [
     { to:'/ai',        label:'Home',      icon:<HomeIcon /> },
@@ -271,7 +270,7 @@ export default function Layout() {
             </div>
 
             {/* ── Me (profile) ── */}
-            <NavLink to={user?.userType === 'recruiter' ? '/recruiter' : '/profile'}
+            <NavLink to="/profile"
               style={({ isActive }) => ({ ...S.navItem, ...(isActive ? S.navActive : {}) })}>
               <div style={S.meAvatar}>
                 {photo

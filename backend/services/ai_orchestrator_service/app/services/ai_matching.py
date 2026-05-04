@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from services.ai_orchestrator_service.app.services.ai_embeddings import HashingEmbeddingService
 from services.ai_orchestrator_service.app.services.ai_resume_intelligence import (
     collect_resume_text,
-    extract_keywords,
     job_skills,
     normalize_skill,
     parse_resume,
     seniority_target_years,
 )
+from services.shared.resume_parser import extract_keywords
 
 
 @dataclass(slots=True)
