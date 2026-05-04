@@ -1,0 +1,2 @@
+FROM mongo:7
+COPY infra/mongo/init.js /docker-entrypoint-initdb.d/

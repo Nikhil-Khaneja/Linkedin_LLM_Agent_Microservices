@@ -10,6 +10,8 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+  # Local / CI: do not wait on EC2 instance metadata (169.254.169.254) when creds are absent.
+  skip_metadata_api_check = true
 }
 
 data "aws_availability_zones" "available" {

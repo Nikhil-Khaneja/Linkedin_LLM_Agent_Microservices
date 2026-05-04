@@ -26,7 +26,7 @@ HASH="$(python3 -c "import hashlib; print(hashlib.sha256('KaggleImport#2026'.enc
 docker compose exec -T mysql sh -c "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" linkedin_sim -e \"UPDATE users SET email='bulk-kaggle-recruiter@example.com', password_hash='${HASH}' WHERE user_id='rec_kaggle_import'; UPDATE recruiters SET email='bulk-kaggle-recruiter@example.com' WHERE recruiter_id='rec_kaggle_import';\""
 
 echo "[5/5] Demo seed (HTTP; ok if partially already seeded)"
-python3 scripts/seed_demo_data.py || true
+./scripts/run_seed_demo.sh || true
 
 # Optional: small synthetic bulk jobs for the Kaggle-import recruiter (fast UI checks; not the full dataset).
 # From the host, talk to MySQL on the published port, not the docker hostname "mysql".

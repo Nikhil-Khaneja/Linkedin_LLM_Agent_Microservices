@@ -1,0 +1,2 @@
+# Installed on the host by bootstrap_local.sh when missing (Docker images use backend/requirements.txt).
+requests==2.32.3

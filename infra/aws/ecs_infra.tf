@@ -54,7 +54,10 @@ resource "aws_service_discovery_service" "kafka" {
   dns_config {
     namespace_id   = aws_service_discovery_private_dns_namespace.app.id
     routing_policy = "MULTIVALUE"
-    dns_records { ttl = 10; type = "A" }
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
   }
   health_check_custom_config { failure_threshold = 1 }
 }
@@ -116,7 +119,10 @@ resource "aws_service_discovery_service" "mongo" {
   dns_config {
     namespace_id   = aws_service_discovery_private_dns_namespace.app.id
     routing_policy = "MULTIVALUE"
-    dns_records { ttl = 10; type = "A" }
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
   }
   health_check_custom_config { failure_threshold = 1 }
 }
@@ -185,7 +191,10 @@ resource "aws_service_discovery_service" "minio" {
   dns_config {
     namespace_id   = aws_service_discovery_private_dns_namespace.app.id
     routing_policy = "MULTIVALUE"
-    dns_records { ttl = 10; type = "A" }
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
   }
   health_check_custom_config { failure_threshold = 1 }
 }

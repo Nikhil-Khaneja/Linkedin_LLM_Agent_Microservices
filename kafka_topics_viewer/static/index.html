@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kafka topics viewer</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --muted: #8b9cb3;
+      --accent: #58a6ff;
+      --err: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      min-height: 100vh;
+    }
+    header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+    header p { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--muted); }
+    .layout { display: grid; grid-template-columns: minmax(220px, 280px) 1fr; gap: 0; min-height: calc(100vh - 72px); }
+    @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+    aside {
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      background: var(--panel);
+      overflow: auto;
+      max-height: calc(100vh - 72px);
+    }
+    main { padding: 1rem; overflow: auto; max-height: calc(100vh - 72px); }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
+    label { font-size: 0.8rem; color: var(--muted); }
+    input[type="number"] { width: 4.5rem; padding: 0.35rem 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+    button {
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: #212c3d;
+      color: var(--text);
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { background: #1f4d7a; border-color: #388bfd; }
+    .topic-list { margin-top: 0.5rem; max-height: 55vh; overflow: auto; }
+    .topic-item { display: flex; align-items: center; gap: 0.45rem; padding: 0.2rem 0; font-size: 0.82rem; }
+    .topic-item input { accent-color: var(--accent); }
+    .status { font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0; }
+    .status.err { color: var(--err); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    th, td { border: 1px solid var(--border); padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+    th { background: var(--panel); position: sticky; top: 0; z-index: 1; }
+    td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; max-width: 520px; }
+    td pre { margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; }
+    .errors { background: #3d1f1f; border: 1px solid var(--err); border-radius: 6px; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Kafka topics viewer</h1>
+    <p id="bootstrapLine">Loading bootstrap…</p>
+  </header>
+  <div class="layout">
+    <aside>
+      <div class="row">
+        <button type="button" id="btnRefreshTopics">Refresh topics</button>
+        <button type="button" id="btnSelectAll">Select all</button>
+        <button type="button" id="btnSelectNone">Clear</button>
+      </div>
+      <div class="row">
+        <label>Msgs / topic <input type="number" id="limitPer" value="40" min="1" max="500" /></label>
+        <label>Auto-refresh (s) <input type="number" id="autoSec" value="0" min="0" max="300" placeholder="0=off" /></label>
+      </div>
+      <div class="row">
+        <button type="button" class="primary" id="btnLoad">Load tails</button>
+      </div>
+      <p class="status" id="topicStatus"></p>
+      <div class="topic-list" id="topicList"></div>
+    </aside>
+    <main>
+      <p class="status" id="loadStatus"></p>
+      <div id="errorsBox" class="errors" style="display:none;"></div>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Topic</th>
+              <th>P</th>
+              <th>Offset</th>
+              <th>Key</th>
+              <th>Value (JSON)</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let autoTimer = null;
+
+    function fmtTime(ms) {
+      if (ms == null || ms <= 0) return '—';
+      try { return new Date(ms).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC'); }
+      catch { return String(ms); }
+    }
+
+    async function refreshTopics() {
+      $('topicStatus').textContent = 'Loading topics…';
+      $('topicStatus').className = 'status';
+      const r = await fetch('/api/topics');
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || r.statusText);
+      $('bootstrapLine').textContent = 'Bootstrap: ' + j.bootstrap;
+      const list = $('topicList');
+      list.innerHTML = '';
+      j.topics.forEach((t, i) => {
+        const id = 'topic-cb-' + i;
+        const div = document.createElement('div');
+        div.className = 'topic-item';
+        const inp = document.createElement('input');
+        inp.type = 'checkbox';
+        inp.id = id;
+        inp.dataset.topic = t;
+        const lab = document.createElement('label');
+        lab.htmlFor = id;
+        lab.textContent = t;
+        div.appendChild(inp);
+        div.appendChild(lab);
+        list.appendChild(div);
+      });
+      $('topicStatus').textContent = j.topics.length + ' topics';
+    }
+
+    function selectedTopics() {
+      return [...document.querySelectorAll('.topic-item input:checked')].map((el) => el.dataset.topic);
+    }
+
+    function setAll(checked) {
+      document.querySelectorAll('.topic-item input').forEach((el) => { el.checked = checked; });
+    }
+
+    async function loadTails() {
+      const topics = selectedTopics();
+      const limit = Math.min(500, Math.max(1, parseInt($('limitPer').value, 10) || 40));
+      $('loadStatus').textContent = topics.length ? 'Loading…' : 'Select at least one topic.';
+      $('loadStatus').className = 'status' + (topics.length ? '' : ' err');
+      $('errorsBox').style.display = 'none';
+      $('rows').innerHTML = '';
+      if (!topics.length) return;
+      const q = new URLSearchParams({ topics: topics.join(','), limit_per_topic: String(limit) });
+      const r = await fetch('/api/tail-bulk?' + q.toString());
+      const j = await r.json();
+      if (!r.ok) {
+        $('loadStatus').textContent = j.detail || r.statusText;
+        $('loadStatus').className = 'status err';
+        return;
+      }
+      const errKeys = Object.keys(j.errors || {});
+      if (errKeys.length) {
+        $('errorsBox').style.display = 'block';
+        $('errorsBox').textContent = 'Partial errors: ' + errKeys.map((k) => k + ': ' + j.errors[k]).join(' | ');
+      }
+      $('loadStatus').textContent = 'Merged ' + j.merged.length + ' messages across ' + topics.length + ' topic(s).';
+      $('loadStatus').className = 'status';
+      const tb = $('rows');
+      for (const m of j.merged) {
+        const tr = document.createElement('tr');
+        const valStr = typeof m.value === 'object' ? JSON.stringify(m.value, null, 0) : String(m.value);
+        tr.innerHTML =
+          '<td class="mono">' + fmtTime(m.timestamp_ms) + '</td>' +
+          '<td class="mono">' + (m.topic || '') + '</td>' +
+          '<td class="mono">' + m.partition + '</td>' +
+          '<td class="mono">' + m.offset + '</td>' +
+          '<td class="mono">' + (m.key ? escapeHtml(m.key) : '—') + '</td>' +
+          '<td><pre>' + escapeHtml(valStr) + '</pre></td>';
+        tb.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function scheduleAuto() {
+      if (autoTimer) clearInterval(autoTimer);
+      autoTimer = null;
+      const sec = parseInt($('autoSec').value, 10) || 0;
+      if (sec > 0) autoTimer = setInterval(loadTails, sec * 1000);
+    }
+
+    $('btnRefreshTopics').addEventListener('click', () => refreshTopics().catch((e) => {
+      $('topicStatus').textContent = e.message;
+      $('topicStatus').className = 'status err';
+    }));
+    $('btnSelectAll').addEventListener('click', () => setAll(true));
+    $('btnSelectNone').addEventListener('click', () => setAll(false));
+    $('btnLoad').addEventListener('click', () => loadTails().catch((e) => {
+      $('loadStatus').textContent = e.message;
+      $('loadStatus').className = 'status err';
+    }));
+    $('autoSec').addEventListener('change', scheduleAuto);
+
+    refreshTopics().catch((e) => { $('topicStatus').textContent = e.message; $('topicStatus').className = 'status err'; });
+  </script>
+</body>
+</html>

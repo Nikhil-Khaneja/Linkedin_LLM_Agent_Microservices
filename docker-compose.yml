@@ -66,6 +66,23 @@ services:
       timeout: 10s
       retries: 20
 
+  kafka_topics_viewer:
+    build:
+      context: ./kafka_topics_viewer
+    ports:
+      - "${KAFKA_VIEWER_PUBLISH_PORT:-3840}:3840"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:3840/api/health', timeout=2)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
 
   minio:
     image: minio/minio:latest
@@ -122,6 +139,7 @@ services:
   auth_service:
     build:
       context: ./backend
+      target: auth_service
     command: uvicorn services.auth_service.app.main:app --host 0.0.0.0 --port 8001
     environment:
       EVENT_BUS_MODE: kafka
@@ -169,6 +187,7 @@ services:
   member_profile_service:
     build:
       context: ./backend
+      target: member_profile_service
     command: uvicorn services.member_profile_service.app.main:app --host 0.0.0.0 --port 8002
     environment:
       EVENT_BUS_MODE: kafka
@@ -215,6 +234,7 @@ services:
   recruiter_company_service:
     build:
       context: ./backend
+      target: recruiter_company_service
     command: uvicorn services.recruiter_company_service.app.main:app --host 0.0.0.0 --port 8003
     environment:
       EVENT_BUS_MODE: kafka
@@ -256,6 +276,7 @@ services:
   jobs_service:
     build:
       context: ./backend
+      target: jobs_service
     command: uvicorn services.jobs_service.app.main:app --host 0.0.0.0 --port 8004
     environment:
       EVENT_BUS_MODE: kafka
@@ -299,6 +320,7 @@ services:
   applications_service:
     build:
       context: ./backend
+      target: applications_service
     command: uvicorn services.applications_service.app.main:app --host 0.0.0.0 --port 8005
     environment:
       EVENT_BUS_MODE: kafka
@@ -345,6 +367,7 @@ services:
   messaging_connections_service:
     build:
       context: ./backend
+      target: messaging_connections_service
     command: uvicorn services.messaging_connections_service.app.main:app --host 0.0.0.0 --port 8006
     environment:
       EVENT_BUS_MODE: kafka
@@ -386,6 +409,7 @@ services:
   analytics_service:
     build:
       context: ./backend
+      target: analytics_service
     command: uvicorn services.analytics_service.app.main:app --host 0.0.0.0 --port 8007
     environment:
       EVENT_BUS_MODE: kafka
@@ -431,6 +455,7 @@ services:
   ai_orchestrator_service:
     build:
       context: ./backend
+      target: ai_orchestrator_service
     command: uvicorn services.ai_orchestrator_service.app.main:app --host 0.0.0.0 --port 8008
     environment:
       EVENT_BUS_MODE: kafka

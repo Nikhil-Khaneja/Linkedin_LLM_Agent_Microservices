@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Docker images and push to ECR
+# Build Docker images and push to ECR (per-service backend images + frontend).
 # Usage: ./push_images.sh [--region us-east-1]
 set -euo pipefail
 
@@ -7,7 +7,6 @@ REGION=${AWS_DEFAULT_REGION:-us-east-1}
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 ECR_BASE="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
 
-BACKEND_REPO="$ECR_BASE/linkedin-sim/backend"
 FRONTEND_REPO="$ECR_BASE/linkedin-sim/frontend"
 ALB_DNS=$(terraform output -raw alb_dns_name 2>/dev/null || echo "")
 
@@ -17,11 +16,13 @@ echo "==> Logging in to ECR…"
 aws ecr get-login-password --region "$REGION" | \
   docker login --username AWS --password-stdin "$ECR_BASE"
 
-# ── Backend image ─────────────────────────────────────────────────────────────
-echo "==> Building backend image…"
-docker build -t "$BACKEND_REPO:latest" "$PROJECT_ROOT/backend"
-echo "==> Pushing backend image…"
-docker push "$BACKEND_REPO:latest"
+# ── Backend: one image per microservice (same Dockerfile targets as ECS CI) ──
+for target in auth_service recruiter_company_service member_profile_service jobs_service applications_service messaging_connections_service analytics_service ai_orchestrator_service; do
+  repo="$ECR_BASE/linkedin-sim/${target}"
+  echo "==> Building & pushing $target → $repo:latest"
+  docker build --target "$target" -t "$repo:latest" "$PROJECT_ROOT/backend"
+  docker push "$repo:latest"
+done
 
 # ── Frontend image (baked with ALB URLs) ─────────────────────────────────────
 echo "==> Building frontend image (ALB=$ALB_DNS)…"
@@ -40,12 +41,11 @@ echo "==> Pushing frontend image…"
 docker push "$FRONTEND_REPO:latest"
 
 echo ""
-echo "==> Images pushed successfully."
-echo "    Backend:  $BACKEND_REPO:latest"
+echo "==> Images pushed successfully (per-service backend + frontend)."
 echo "    Frontend: $FRONTEND_REPO:latest"
 echo ""
 echo "==> Force-deploy frontend ECS service to pick up new image…"
 CLUSTER="linkedin-sim"
 aws ecs update-service --cluster "$CLUSTER" --service "${CLUSTER}-frontend" \
-  --force-new-deployment --region "$REGION" > /dev/null
-echo "    Done. Frontend will update in ~2 minutes."
+  --force-new-deployment --region "$REGION" > /dev/null || true
+echo "    Done (if cluster/service existed)."

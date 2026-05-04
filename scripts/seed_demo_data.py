@@ -31,6 +31,31 @@ def get_data(resp):
     return resp.get("data", resp)
 
 
+def job_id_from_jobs_create_response(resp):
+    """Extract job_id from a successful create; 409 duplicate responses have no job_id."""
+    if not isinstance(resp, dict):
+        return None
+    if resp.get("success") is False:
+        return None
+    data = get_data(resp)
+    return data.get("job_id") if isinstance(data, dict) else None
+
+
+def first_open_job_for_recruiter(recruiter_id, headers):
+    """When creates all hit duplicate_job (re-seed), list this recruiter's open jobs from MySQL/API."""
+    resp = post(
+        "jobs",
+        "/jobs/byRecruiter",
+        {"recruiter_id": recruiter_id, "status": "open", "page": 1, "page_size": 50},
+        headers,
+    )
+    items = get_data(resp).get("items") or []
+    for row in items:
+        if str(row.get("status") or "open").lower() == "open" and row.get("job_id"):
+            return row["job_id"]
+    return None
+
+
 def main():
     print('Registering demo users...')
     post('auth', '/auth/register', {
@@ -90,10 +115,17 @@ def main():
             'work_mode': 'hybrid',
             'skills_required': ['Python', 'Kafka', 'MySQL']
         }, HEADERS_RECRUITER, allow_conflict=True)
-        job_id = get_data(resp).get('job_id') if isinstance(resp, dict) else None
+        job_id = job_id_from_jobs_create_response(resp)
         if job_id:
             created_job_ids.append(job_id)
-    first_job_id = created_job_ids[0] if created_job_ids else 'job_3301'
+    first_job_id = created_job_ids[0] if created_job_ids else None
+    if not first_job_id:
+        first_job_id = first_open_job_for_recruiter(recruiter_id, HEADERS_RECRUITER)
+    if not first_job_id:
+        raise RuntimeError(
+            'No open job_id for demo seed (job creates failed or returned duplicates without listing jobs). '
+            'Ensure recruiter has at least one open job.'
+        )
 
     print('Submitting application...')
     post('applications', '/applications/submit', {
