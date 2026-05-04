@@ -165,11 +165,6 @@ jobs:
           _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
           REG="$(_trim "${{ steps.login-ecr.outputs.registry }}")"
           TAG="${{ steps.meta.outputs.tag }}"
-          # APP_HOST may be "domain,elastic-ip" for CORS; use first segment for baked REACT_APP_* URLs.
-          HOST="$(_trim "${APP_HOST%%,*}")"
-          SCHEME="${PUBLIC_HTTP_SCHEME:-http}"
-          SCHEME="$(_trim "$SCHEME")"
-          [[ -z "$SCHEME" ]] && SCHEME=http
           FRONT="${ECR_FRONTEND_REPOSITORY}"
           MYSQLR="${ECR_MYSQL_REPOSITORY}"
           MONGOR="${ECR_MONGO_REPOSITORY}"
@@ -177,18 +172,9 @@ jobs:
             docker build --target "$target" -t "${REG}/linkedin-sim/${target}:${TAG}" ./backend
             docker push "${REG}/linkedin-sim/${target}:${TAG}"
           done
-          # REACT_APP_* ports must match ecs-taskdef.template.json hostPort per service and
-          # frontend/src/config/api.js fallbacks (8001–8008). Platform host ports come from render_taskdefs.HOST_PORTS.
-          docker build \
-            --build-arg "REACT_APP_AUTH_URL=${SCHEME}://${HOST}:8001" \
-            --build-arg "REACT_APP_MEMBER_URL=${SCHEME}://${HOST}:8002" \
-            --build-arg "REACT_APP_RECRUITER_URL=${SCHEME}://${HOST}:8003" \
-            --build-arg "REACT_APP_JOB_URL=${SCHEME}://${HOST}:8004" \
-            --build-arg "REACT_APP_APP_URL=${SCHEME}://${HOST}:8005" \
-            --build-arg "REACT_APP_MSG_URL=${SCHEME}://${HOST}:8006" \
-            --build-arg "REACT_APP_ANALYTICS_URL=${SCHEME}://${HOST}:8007" \
-            --build-arg "REACT_APP_AI_URL=${SCHEME}://${HOST}:8008" \
-            -t "${{ steps.meta.outputs.frontend }}" ./frontend
+          # Build frontend without baking a single host into REACT_APP_* so it works
+          # from both domain and direct IP while DNS/TLS propagates.
+          docker build -t "${{ steps.meta.outputs.frontend }}" ./frontend
           docker push "${{ steps.meta.outputs.frontend }}"
           docker build -f infra/ecs-ec2/Dockerfile.mysql -t "${{ steps.meta.outputs.mysql }}" .
           docker push "${{ steps.meta.outputs.mysql }}"
