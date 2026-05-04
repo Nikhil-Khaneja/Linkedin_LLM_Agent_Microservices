@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import { normalizeMemberMediaUrl } from '../utils/memberMediaUrl';
 
 const PIE_COLORS = ['#0a66c2', '#057642', '#7c3aed', '#e68a00', '#cc1016', '#06b6d4', '#ec4899', '#64748b'];
 
@@ -137,7 +138,7 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!isOwnProfile || !currentId || !profile?.profile_photo_url) return;
     try {
-      localStorage.setItem(`photo_${currentId}`, profile.profile_photo_url);
+      localStorage.setItem(`photo_${currentId}`, normalizeMemberMediaUrl(profile.profile_photo_url));
     } catch {
       /* ignore quota / private mode */
     }
@@ -202,7 +203,7 @@ export default function ProfilePage() {
         setProfile(p);
         if (p) hydrateMemberForm(p);
         if (p?.profile_photo_url && viewedId === currentId) {
-          localStorage.setItem(`photo_${currentId}`, p.profile_photo_url);
+          localStorage.setItem(`photo_${currentId}`, normalizeMemberMediaUrl(p.profile_photo_url));
         }
         return;
       } catch (err) {
@@ -322,7 +323,7 @@ export default function ProfilePage() {
         if (isMemberProfile) hydrateMemberForm(next);
         if (mediaType === 'profile_photo' && currentId && next.profile_photo_url) {
           try {
-            localStorage.setItem(`photo_${currentId}`, next.profile_photo_url);
+            localStorage.setItem(`photo_${currentId}`, normalizeMemberMediaUrl(next.profile_photo_url));
           } catch {
             /* ignore */
           }
@@ -421,7 +422,7 @@ export default function ProfilePage() {
         <div className="li-card" style={{ padding: 24 }}>
           <div style={{ display: 'flex', gap: 20, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
             <div style={S.avatarWrap}>
-              {profile.profile_photo_url ? <img src={profile.profile_photo_url} alt="" style={S.avatarImg} /> : <div style={S.avatarFallback}>{avatarLetter}</div>}
+              {profile.profile_photo_url ? <img src={normalizeMemberMediaUrl(profile.profile_photo_url)} alt="" style={S.avatarImg} /> : <div style={S.avatarFallback}>{avatarLetter}</div>}
             </div>
             <div style={{ flex: 1, minWidth: 240 }}>
               <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>{displayName || 'Profile'}</h1>

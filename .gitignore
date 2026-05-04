@@ -19,7 +19,9 @@ venv/
 .venv-bootstrap/
 env/
 .env
+.env.aws.mysql
 !.env.example
+!.env.aws.mysql.example
 
 # ECS CI render output (local smoke tests)
 infra/ecs-ec2/ecs-taskdef.rendered.json
@@ -52,6 +54,9 @@ minio_data/
 
 # Kaggle CSV/zips (large local downloads)
 data/kaggle_download/
+data/kaggle/*.csv
+data/kaggle/*.zip
+data/kaggle/**/*.csv
 
 # JMeter results (raw)
 tests/jmeter/*.jtl
@@ -69,3 +74,5 @@ tests/jmeter/results/
 secrets/
 .secrets/
 cursor-ecs-ec2-cicd-spec.md
+data/README.md
+data/kaggle/.gitkeep

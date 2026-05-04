@@ -295,8 +295,21 @@ def _company_name_lookup(jobs_csv: Path) -> dict[str, str]:
     if not cid or not cname:
         return {}
     out: dict[str, str] = {}
+
+    def _norm_cid(s: str) -> str:
+        t = (s or "").strip()
+        if not t:
+            return ""
+        try:
+            x = float(t)
+            if x == int(x):
+                return str(int(x))
+        except (ValueError, OverflowError):
+            pass
+        return t
+
     for r in rows:
-        k = (r.get(cid or "") or "").strip()
+        k = _norm_cid(r.get(cid or "") or "")
         v = (r.get(cname or "") or "").strip()
         if k and v:
             out[k] = v
@@ -329,7 +342,12 @@ def load_jobs(path: Path, max_jobs: int, chunk: int) -> int:
         desc = (r.get(c_desc or "") or title)[:8000]
         company = (r.get(c_company or "") if c_company else "").strip()
         if not company and c_company_id:
-            company = company_by_id.get((r.get(c_company_id) or "").strip(), "") or "Unknown company"
+            raw = (r.get(c_company_id) or "").strip()
+            try:
+                nk = str(int(float(raw))) if raw and float(raw) == int(float(raw)) else raw
+            except (ValueError, TypeError, OverflowError):
+                nk = raw
+            company = company_by_id.get(nk, "") or company_by_id.get(raw, "") or "Unknown company"
         if not company:
             company = "Unknown company"
         location = (r.get(c_location or "") if c_location else "")[:120] or "Remote"

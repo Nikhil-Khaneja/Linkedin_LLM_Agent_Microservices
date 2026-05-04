@@ -91,6 +91,57 @@ make verify-ecs-ec2
 # or: ./scripts/verify_ecs_ec2_local.sh
 ```
 
+### Loading bulk demo data on AWS (MySQL + Mongo)
+
+The platform task publishes **MySQL `3306`** and **MongoDB `27017`** on the **EC2 host**. The default security group does **not** expose those ports to the public internet (only SSH from your IP, HTTP/S, app ports, etc.). Load data by **SSH tunnel** or by running scripts **on the instance**.
+
+**1. SSH tunnel from your laptop** (replace key, user, and host; Amazon Linux uses `ec2-user`, Ubuntu uses `ubuntu`):
+
+```bash
+ssh -i ./linkedin-sim-key.pem -L 3307:127.0.0.1:3306 -L 27018:127.0.0.1:27017 ec2-user@<EC2_ELASTIC_IP>
+```
+
+Leave that session open. In another terminal:
+
+```bash
+export MYSQL_HOST=127.0.0.1 MYSQL_PORT=3307 MYSQL_USER=root MYSQL_PASSWORD=root MYSQL_DATABASE=linkedin_sim
+export MONGO_URI=mongodb://127.0.0.1:27018
+export MONGO_DATABASE=linkedin_sim
+
+cd /path/to/Linkedin_Prototype_LLM_Agent_Microservices
+pip install pymysql pymongo   # if needed
+
+# Download real Kaggle CSVs — see data/README.md (job_postings.csv, Resume/Resume.csv).
+# Easiest on your laptop: ./scripts/populate_aws_mysql.sh (AWS CLI + SSH to EC2 + seed).
+# Or: copy .env.aws.mysql.example → .env.aws.mysql, open the tunnel below, then:
+#   set -a && source .env.aws.mysql && set +a && ./scripts/bulk_seed_aws_mysql.sh
+python3 scripts/bulk_seed_datasets.py jobs --csv ./data/kaggle/job_postings.csv --recruiters 500 --jobs 10000 --run-id aws1
+python3 scripts/bulk_seed_datasets.py members --csv ./data/kaggle_download/Resume/Resume.csv --members 1000 --run-id aws1
+python3 scripts/bulk_seed_datasets.py applications --run-id aws1 --per-member 10
+python3 scripts/mongo_seed_demo.py --member-id mem_501 --count 20
+```
+
+The template defaults **`MYSQL_ROOT_PASSWORD`** / app **`MYSQL_PASSWORD`** to **`root`** unless you changed them in the rendered task definition. `ECS_HOST_PRIVATE_IP` in GitHub variables is the address **app tasks** use; your tunnel targets **localhost on the EC2 box** where ports are mapped.
+
+**2. Run on the EC2 host** (recommended for large seeds — avoids laptop SSH tunnel timeouts):
+
+```bash
+# After git pull or rsync of repo + data/kaggle/*.csv onto the instance:
+cd ~/Linkedin_Prototype_LLM_Agent_Microservices   # your path
+pip3 install --user pymongo pymysql   # if needed
+./scripts/bulk_seed_on_ec2_host.sh
+```
+
+That script picks the Docker **host port** mapped to MySQL **3306** (or uses `MYSQL_PORT` if you set it), then runs jobs + members + applications for **`BULK_SEED_RUN_ID`** (default `aws1`).
+
+You can also set `MYSQL_HOST` / `MYSQL_PORT` manually (see `docker ps` for `0.0.0.0:PORT->3306`) and run `python3 scripts/bulk_seed_datasets.py …` yourself.
+
+**2b.** Legacy note: set `MYSQL_HOST` to the instance **private IP** (or `127.0.0.1`) and `MONGO_URI` to `mongodb://<private-ip>:27017` when tooling expects raw bridge addresses.
+
+**3. Other Mongo data** (`linkedin_sim_docs` used by `document_store` for some features) can be loaded with `mongosh` against the same tunnel URI; member **in-app** notifications live in **`linkedin_sim.notifications`**.
+
+**4. After large MySQL inserts**, restart or flush **Redis** if job-search caches look stale, and ensure **`infra/mysql/002_indexes.sql`** / **`006_jobs_fulltext.sql`** were applied on that database for search performance.
+
 ## GitHub repository secret (OpenRouter / AI)
 
 The deploy workflow passes this into `render_taskdefs.py`, which bakes it into the **AI orchestrator** task environment on ECS.

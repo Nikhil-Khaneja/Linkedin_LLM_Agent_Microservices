@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import { normalizeMemberMediaUrl } from '../utils/memberMediaUrl';
 
 const COLORS = ['#0a66c2', '#057642', '#7c3aed', '#e68a00', '#cc1016', '#06b6d4'];
 
@@ -68,7 +69,7 @@ export default function DashboardPage() {
 
   const displayName = profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
   const initial = ((displayName || user?.email || 'U')[0]).toUpperCase();
-  const photo = localStorage.getItem(`photo_${currentId}`);
+  const photo = normalizeMemberMediaUrl(localStorage.getItem(`photo_${currentId}`) || '');
 
   return (
     <div>

@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import BASE from '../config/api';
+import { normalizeMemberMediaUrl } from '../utils/memberMediaUrl';
 
 const HomeIcon  = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M23 9v2h-2v7a3 3 0 01-3 3h-4v-6h-4v6H6a3 3 0 01-3-3v-7H1V9l11-7z"/></svg>;
 const JobIcon   = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M17 6V5a3 3 0 00-3-3h-4a3 3 0 00-3 3v1H2v4a3 3 0 003 3h14a3 3 0 003-3V6h-5zm-8-1a1 1 0 011-1h4a1 1 0 011 1v1H9V5zm-2 9v6h2v-5h6v5h2v-6H7z"/></svg>;
@@ -29,7 +30,7 @@ export default function Layout() {
   const searchTimer = useRef(null);
 
   const initial = ((user?.email || 'U')[0]).toUpperCase();
-  const photo   = localStorage.getItem(`photo_${user?.principalId || user?.userId}`);
+  const photo   = normalizeMemberMediaUrl(localStorage.getItem(`photo_${user?.principalId || user?.userId}`) || '');
   const token = localStorage.getItem('access_token');
   const authCfg = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
   const currentId = user?.userId || user?.principalId;
