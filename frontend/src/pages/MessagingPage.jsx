@@ -7,17 +7,19 @@ import { useAuth } from '../context/AuthContext';
 
 export default function MessagingPage() {
   const { user } = useAuth();
-  const currentId = user?.userId || user?.principalId;
+  const currentId = user?.principalId || user?.userId;
   const [threads, setThreads] = useState([]);
   const [active, setActive] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [connections, setConnections] = useState([]);
-  const [newUserId, setNewUserId] = useState('');
+  const [query, setQuery] = useState('');
   const [connectionSearch, setConnectionSearch] = useState([]);
   const [searchingConnections, setSearchingConnections] = useState(false);
-  const bottomRef = useRef(null);
+  const messagesRef = useRef(null);
+  const stickToBottomRef = useRef(true);
+  const prevThreadRef = useRef('');
   const [searchParams, setSearchParams] = useSearchParams();
   const targetUserId = searchParams.get('user') || '';
   const targetThreadId = searchParams.get('thread') || '';
@@ -32,8 +34,16 @@ export default function MessagingPage() {
   }, [currentId, token, targetUserId, targetThreadId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const threadChanged = prevThreadRef.current !== (active?.thread_id || '');
+    if (threadChanged) {
+      prevThreadRef.current = active?.thread_id || '';
+      stickToBottomRef.current = true;
+    }
+    if (!stickToBottomRef.current) return;
+    const el = messagesRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, active?.thread_id]);
 
   useEffect(() => {
     if (draftText && !text) setText(draftText);
@@ -48,7 +58,18 @@ export default function MessagingPage() {
     return () => clearInterval(timer);
   }, [currentId, active?.thread_id, token]);
 
-  const activeMessages = useMemo(() => ([...messages].sort((a, b) => String(a.sent_at || '').localeCompare(String(b.sent_at || '')))), [messages]);
+  const activeMessages = useMemo(
+    () => ([...messages].sort((a, b) => {
+      const left = String(a.sent_at || a.created_at || '');
+      const right = String(b.sent_at || b.created_at || '');
+      return left.localeCompare(right);
+    })),
+    [messages],
+  );
+  const currentUserIds = useMemo(
+    () => new Set([user?.principalId, user?.userId, currentId].filter(Boolean).map((v) => String(v))),
+    [user?.principalId, user?.userId, currentId],
+  );
 
   const resolveUserPreview = async (userId) => {
     if (!userId) return { other_display_name: 'Unknown', other_profile_photo_url: null, other_headline: '' };
@@ -195,6 +216,7 @@ export default function MessagingPage() {
   const send = async () => {
     if (!text.trim() || !active) return;
     setSending(true);
+    stickToBottomRef.current = true;
     try {
       const optimistic = { sender_id: currentId, text: text.trim(), sent_at: new Date().toISOString() };
       setMessages((prev) => [...prev, optimistic]);
@@ -224,7 +246,7 @@ export default function MessagingPage() {
         other_profile_photo_url: preview.other_profile_photo_url,
         other_headline: preview.other_headline,
       };
-      if (clearInput) setNewUserId('');
+      if (clearInput) setQuery('');
       setThreads((prev) => prev.some((item) => item.thread_id === threadId) ? prev : [threadObj, ...prev]);
       await openThread(threadObj);
       if (draftText) setText(draftText);
@@ -235,7 +257,7 @@ export default function MessagingPage() {
   };
 
   const searchConnections = () => {
-    const q = newUserId.trim().toLowerCase();
+    const q = query.trim().toLowerCase();
     if (!q) {
       setConnectionSearch(connections.slice(0, 12));
       return;
@@ -256,7 +278,7 @@ export default function MessagingPage() {
   };
 
   const getFilteredConnections = () => {
-    const q = newUserId.trim().toLowerCase();
+    const q = query.trim().toLowerCase();
     if (!q) return connections.slice(0, 12);
     return connections.filter((conn) => {
       const hay = [
@@ -270,41 +292,54 @@ export default function MessagingPage() {
     });
   };
 
+  const displayedConnections = useMemo(() => {
+    if (query.trim()) return getFilteredConnections().slice(0, 50);
+    if (connectionSearch.length) return connectionSearch.slice(0, 50);
+    return connections.slice(0, 50);
+  }, [connections, query, connectionSearch]);
+
+  const isMessageMine = (message) => {
+    const sender = String(
+      message?.sender_id
+      || message?.sender_user_id
+      || message?.sender_principal_id
+      || '',
+    );
+    return !!sender && currentUserIds.has(sender);
+  };
+
+  const handleMessagesScroll = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < 80;
+  };
+
+  const searchOpen = query.trim().length > 0;
+
   return (
     <div style={S.page}>
       <div style={S.sidebar}>
         <div style={S.sideHeader}><h2 style={{ fontSize: 20, fontWeight: 600 }}>Messaging</h2></div>
         <div style={S.newMsg}>
           <input
-            value={newUserId}
-            onChange={(e) => setNewUserId(e.target.value)}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder="Search connections..."
             style={S.newInput}
             onKeyDown={(e) => e.key === 'Enter' && searchConnections()}
           />
           <button onClick={searchConnections} style={S.searchBtn}>🔍</button>
-          <button
-            onClick={() => {
-              const filtered = getFilteredConnections();
-              setConnectionSearch(filtered);
-              const first = filtered[0];
-              const userId = normalizeConnectionUserId(first);
-              if (!userId) return;
-              createOrOpenThread(userId, false);
-            }}
-            style={S.newBtn}
-            title="Start chat with first search result"
-          >
-            +
-          </button>
         </div>
-        <div style={S.connectionResults}>
-          {newUserId.trim().length > 0 && (
-            <>
-              <p style={S.connectionResultMeta}>
-                {searchingConnections ? 'Searching...' : `${connectionSearch.length} connection${connectionSearch.length === 1 ? '' : 's'} found`}
-              </p>
-              {connectionSearch.slice(0, 6).map((conn) => {
+        {searchOpen && (
+          <div style={S.connectionResults}>
+            <p style={S.connectionResultMeta}>
+              {searchingConnections ? 'Searching...' : `${displayedConnections.length} connection${displayedConnections.length === 1 ? '' : 's'} found`}
+            </p>
+            {displayedConnections.length === 0 ? (
+              <p style={{ padding: '8px 16px 14px', fontSize: 13, color: 'rgba(0,0,0,0.5)' }}>No matching connections</p>
+            ) : (
+              displayedConnections.map((conn) => {
                 const userId = normalizeConnectionUserId(conn);
                 if (!userId) return null;
                 return (
@@ -318,11 +353,12 @@ export default function MessagingPage() {
                     <span style={S.connectionResultSub}>{conn?.headline || userId}</span>
                   </button>
                 );
-              })}
-            </>
-          )}
-        </div>
+              })
+            )}
+          </div>
+        )}
         <div style={S.threadList}>
+          <p style={S.sectionMeta}>Conversations</p>
           {threads.length === 0 ? (
             <p style={{ padding: 24, color: 'rgba(0,0,0,0.45)', fontSize: 14, textAlign: 'center' }}>No conversations yet</p>
           ) : threads.map((thread) => (
@@ -349,9 +385,9 @@ export default function MessagingPage() {
                 </p>
               )}
             </div>
-            <div style={S.messages}>
+            <div ref={messagesRef} style={S.messages} onScroll={handleMessagesScroll}>
               {activeMessages.map((message, idx) => {
-                const mine = message.sender_id === currentId;
+                const mine = isMessageMine(message);
                 return (
                   <div key={`${message.message_id || idx}-${message.sent_at || idx}`} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
                     <div style={{ ...S.bubble, background: mine ? '#0a66c2' : '#f3f2ef', color: mine ? '#fff' : 'rgba(0,0,0,0.9)', borderRadius: mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px' }}>
@@ -361,7 +397,6 @@ export default function MessagingPage() {
                   </div>
                 );
               })}
-              <div ref={bottomRef} />
             </div>
             <div style={S.composer}>
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a message…" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} style={S.composeInput} />
@@ -382,13 +417,13 @@ export default function MessagingPage() {
 
 const S = {
   page: { display: 'grid', gridTemplateColumns: '320px 1fr', height: 'calc(100vh - 130px)', minHeight: 520, background: '#fff', borderRadius: 8, boxShadow: '0 0 0 1px rgba(0,0,0,0.08)', overflow: 'hidden' },
-  sidebar: { borderRight: '1px solid rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column' },
+  sidebar: { borderRight: '1px solid rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' },
   sideHeader: { padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.08)' },
   newMsg: { padding: '10px 16px', display: 'flex', gap: 8, borderBottom: '1px solid rgba(0,0,0,0.08)' },
   newInput: { flex: 1, padding: '8px 12px', border: '1px solid rgba(0,0,0,0.3)', borderRadius: 4, fontSize: 14, outline: 'none', fontFamily: 'inherit' },
   searchBtn: { width: 36, height: 36, background: '#fff', color: '#0a66c2', border: '1px solid rgba(10,102,194,0.6)', borderRadius: '50%', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  newBtn: { width: 36, height: 36, background: '#0a66c2', color: '#fff', border: 'none', borderRadius: '50%', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  connectionResults: { maxHeight: 190, overflowY: 'auto', borderBottom: '1px solid rgba(0,0,0,0.08)' },
+  connectionResults: { maxHeight: 220, overflowY: 'auto', borderBottom: '1px solid rgba(0,0,0,0.08)', flexShrink: 0 },
+  sectionMeta: { padding: '8px 16px 2px', fontSize: 11, fontWeight: 700, color: 'rgba(0,0,0,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em' },
   connectionResultMeta: { padding: '8px 16px 4px', fontSize: 12, color: 'rgba(0,0,0,0.5)' },
   connectionResultBtn: { width: '100%', border: 'none', background: '#fff', textAlign: 'left', padding: '8px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(0,0,0,0.04)' },
   connectionResultName: { fontSize: 13, fontWeight: 700, color: 'rgba(0,0,0,0.85)' },
@@ -400,11 +435,12 @@ const S = {
   unread: { background: '#0a66c2', color: '#fff', borderRadius: '50%', padding: '2px 7px', fontSize: 11, fontWeight: 700, marginLeft: 'auto' },
   threadTitle: { fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   threadSubtitle: { fontSize: 13, color: 'rgba(0,0,0,0.5)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  chat: { display: 'flex', flexDirection: 'column' },
-  chatHeader: { padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.08)' },
-  messages: { flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' },
+  chat: { display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' },
+  chatHeader: { padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.08)', flexShrink: 0 },
+  // Top-aligned column so overflow scroll works; bottom stickiness handled via scrollTop in effect.
+  messages: { flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '16px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 0 },
   bubble: { maxWidth: '70%', padding: '10px 16px' },
-  composer: { padding: '12px 16px', borderTop: '1px solid rgba(0,0,0,0.08)', display: 'flex', gap: 10, alignItems: 'center' },
+  composer: { padding: '12px 16px', borderTop: '1px solid rgba(0,0,0,0.08)', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 },
   composeInput: { flex: 1, padding: '12px 16px', border: '1px solid rgba(0,0,0,0.3)', borderRadius: 24, fontSize: 15, fontFamily: 'inherit', outline: 'none' },
   sendBtn: { width: 44, height: 44, background: '#0a66c2', color: '#fff', border: 'none', borderRadius: '50%', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
 };
