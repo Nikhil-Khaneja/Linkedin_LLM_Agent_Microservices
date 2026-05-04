@@ -380,6 +380,18 @@ export default function ProfilePage() {
     }
   };
 
+  const removeConnection = async () => {
+    if (!viewedId) return;
+    try {
+      await axios.post(`${BASE.messaging}/connections/remove`, { other_user_id: viewedId }, authCfg);
+      setIsConnected(false);
+      toast.success('Connection removed');
+      await loadConnectionMeta();
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to remove connection');
+    }
+  };
+
   const updateExperience = (idx, key, value) => {
     setForm((prev) => ({
       ...prev,
@@ -427,7 +439,12 @@ export default function ProfilePage() {
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <button onClick={() => navigate(`/messages?user=${encodeURIComponent(viewedId || '')}`)} style={S.primaryBtn}>Message</button>
                 {!isConnected && !requestSent && <button onClick={sendConnectionRequest} style={S.secondaryBtn}>Connect</button>}
-                {isConnected && <span style={S.badge}>Connected</span>}
+                {isConnected && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={S.badge}>Connected</span>
+                    <button type="button" onClick={removeConnection} style={S.withdrawBtn}>Remove connection</button>
+                  </div>
+                )}
                 {!isConnected && requestSent && <button onClick={withdrawConnectionRequest} style={S.withdrawBtn}>Withdraw request</button>}
               </div>
             )}

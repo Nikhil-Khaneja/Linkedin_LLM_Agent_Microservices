@@ -165,7 +165,9 @@ def _rewrite_app_env(container: dict) -> None:
         elif n == "OWNER1_JWKS_URL":
             e["value"] = f"http://{ip}:8001/.well-known/jwks.json"
         elif n == "MEMBER_PUBLIC_URL":
-            e["value"] = f"{scheme}://{pub}:8002"
+            # Browser loads signed media via GET /members/media on the published host port; it is HTTP only
+            # until a reverse proxy terminates TLS (do not use PUBLIC_HTTP_SCHEME here).
+            e["value"] = f"http://{pub}:8002"
         elif n == "MESSAGING_SERVICE_URL":
             e["value"] = f"http://{ip}:8006"
         elif n == "PUBLIC_BASE_URL":

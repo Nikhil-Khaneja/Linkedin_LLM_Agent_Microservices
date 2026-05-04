@@ -233,6 +233,32 @@ class MessagingConnectionsService:
         self.outbox.enqueue(topic='connection.withdrawn', event=build_event(event_type='connection.withdrawn', actor_id=actor['sub'], entity_type='connection', entity_id=req['request_id'], payload={'requester_id': req['requester_id'], 'receiver_id': req['receiver_id']}, trace=trc), aggregate_type='connection', aggregate_id=req['request_id'])
         return success({'request_id': req['request_id'], 'status': 'withdrawn'}, trc, {'event_dispatch': 'queued'})
 
+    async def remove_connection(self, payload, authorization, trc):
+        """Either participant may remove an accepted connection (disconnect)."""
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        other_id = (payload.get('other_user_id') or '').strip()
+        if not other_id:
+            return fail('validation_error', 'other_user_id is required.', trc, status_code=400)
+        mine = actor['sub']
+        if mine == other_id:
+            return fail('validation_error', 'Cannot remove connection with yourself.', trc, status_code=400)
+        if actor['role'] == 'admin':
+            user_a = (payload.get('user_id') or mine).strip()
+            deleted = self.repo.delete_connection_between(user_a, other_id)
+            if not deleted:
+                return fail('not_found', 'No connection with that user.', trc, status_code=404)
+            return success({'other_user_id': other_id, 'removed': True}, trc, {})
+        conns = [c for c in self.repo.list_connections(mine) if other_id in {c.get('user_a'), c.get('user_b')}]
+        if not conns:
+            return fail('not_found', 'No connection with that user.', trc, status_code=404)
+        deleted = self.repo.delete_connection_between(mine, other_id)
+        if not deleted:
+            return fail('not_found', 'Connection could not be removed.', trc, status_code=404)
+        return success({'other_user_id': other_id, 'removed': True}, trc, {})
+
     def sent_connections(self, payload, authorization, trc):
         try:
             actor = require_auth(authorization)
