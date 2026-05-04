@@ -16,9 +16,14 @@ build/
 # Virtual environments
 venv/
 .venv/
+.venv-bootstrap/
 env/
 .env
 !.env.example
+
+# ECS CI render output (local smoke tests)
+infra/ecs-ec2/ecs-taskdef.rendered.json
+infra/ecs-ec2/rendered/
 
 # Node / frontend
 node_modules/
@@ -52,9 +57,15 @@ data/kaggle_download/
 tests/jmeter/*.jtl
 tests/jmeter/results/
 
+# Terraform — never commit downloaded providers or state
+.terraform/
+*.tfstate
+*.tfstate.*
+
 # Secrets — never commit
 *.pem
 *.key
 *.p12
 secrets/
 .secrets/
+cursor-ecs-ec2-cicd-spec.md

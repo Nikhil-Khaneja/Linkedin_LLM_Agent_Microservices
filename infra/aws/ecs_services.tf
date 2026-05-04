@@ -25,7 +25,7 @@ resource "aws_ecs_task_definition" "svc" {
 
   container_definitions = jsonencode([{
     name      = each.key
-    image     = "${aws_ecr_repository.backend.repository_url}:latest"
+    image     = "${aws_ecr_repository.backend_svc[each.key].repository_url}:latest"
     essential = true
     command   = split(" ", local.service_commands[each.key])
     portMappings = [{ containerPort = each.value, name = each.key }]
@@ -71,7 +71,10 @@ resource "aws_service_discovery_service" "svc" {
   dns_config {
     namespace_id   = aws_service_discovery_private_dns_namespace.app.id
     routing_policy = "MULTIVALUE"
-    dns_records { ttl = 10; type = "A" }
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
   }
   health_check_custom_config { failure_threshold = 1 }
 }

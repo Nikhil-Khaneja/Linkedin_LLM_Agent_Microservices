@@ -1,4 +1,7 @@
-.PHONY: infra-up services-up frontend-up observability-up up down seed-demo seed-perf reset test wait apply-schema apply-mongo topics bootstrap kafka-test
+.PHONY: infra-up services-up frontend-up observability-up up down seed-demo seed-perf reset test wait apply-schema apply-mongo topics bootstrap kafka-test verify-ecs-ec2
+
+verify-ecs-ec2:
+	./scripts/verify_ecs_ec2_local.sh
 
 infra-up:
 	docker compose up -d mysql mongo redis kafka prometheus grafana
@@ -34,7 +37,7 @@ down:
 	docker compose down
 
 seed-demo:
-	python3 scripts/seed_demo_data.py
+	./scripts/run_seed_demo.sh
 
 seed-perf:
 	python3 scripts/seed_perf_data.py

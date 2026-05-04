@@ -1,0 +1,202 @@
+name: Deploy ECS EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_platform:
+        description: 'Redeploy data plane (MySQL, Mongo, Redis, Kafka, MinIO)'
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Path filters
+        uses: dorny/paths-filter@v3
+        id: paths
+        with:
+          filters: |
+            render_code:
+              - 'infra/ecs-ec2/render_taskdefs.py'
+            deploy_code:
+              - 'infra/ecs-ec2/deploy_services.py'
+            taskdef:
+              - 'infra/ecs-ec2/ecs-taskdef.template.json'
+            platform_data:
+              - 'infra/mysql/**'
+              - 'infra/mongo/**'
+              - 'infra/ecs-ec2/Dockerfile.mysql'
+              - 'infra/ecs-ec2/Dockerfile.mongo'
+            backend_shared:
+              - 'backend/requirements.txt'
+              - 'backend/Dockerfile'
+              - 'backend/services/shared/**'
+            auth:
+              - 'backend/services/auth_service/**'
+            member:
+              - 'backend/services/member_profile_service/**'
+            recruiter:
+              - 'backend/services/recruiter_company_service/**'
+            jobs:
+              - 'backend/services/jobs_service/**'
+            applications:
+              - 'backend/services/applications_service/**'
+            messaging:
+              - 'backend/services/messaging_connections_service/**'
+            analytics:
+              - 'backend/services/analytics_service/**'
+            ai:
+              - 'backend/services/ai_orchestrator_service/**'
+            frontend:
+              - 'frontend/**'
+
+      - name: Pick deploy selection
+        id: pick
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.deploy_platform }}" == "true" ]]; then
+              echo "selection=ALL_WITH_PLATFORM" >> "$GITHUB_OUTPUT"
+            else
+              echo "selection=ALL_APPS" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          # Template or renderer changes can alter every task definition — roll all apps + frontend.
+          if [[ "${{ steps.paths.outputs.taskdef }}" == "true" || "${{ steps.paths.outputs.render_code }}" == "true" ]]; then
+            echo "selection=ALL_APPS" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          add_svc() {
+            local n="$1" x
+            for x in "${svc[@]+"${svc[@]}"}"; do [[ "$x" == "$n" ]] && return; done
+            svc+=("$n")
+          }
+          svc=()
+          # Shared backend code (Dockerfile / requirements / services/shared): rebuild all backend ECR images
+          # and roll every backend ECS service (not frontend unless frontend/** also matched).
+          if [[ "${{ steps.paths.outputs.backend_shared }}" == "true" ]]; then
+            add_svc linkedin-sim-auth
+            add_svc linkedin-sim-member-profile
+            add_svc linkedin-sim-recruiter-company
+            add_svc linkedin-sim-jobs
+            add_svc linkedin-sim-applications
+            add_svc linkedin-sim-messaging-connections
+            add_svc linkedin-sim-analytics
+            add_svc linkedin-sim-ai-orchestrator
+          fi
+          if [[ "${{ steps.paths.outputs.platform_data }}" == "true" ]]; then add_svc linkedin-sim-platform; fi
+          if [[ "${{ steps.paths.outputs.auth }}" == "true" ]]; then add_svc linkedin-sim-auth; fi
+          if [[ "${{ steps.paths.outputs.member }}" == "true" ]]; then add_svc linkedin-sim-member-profile; fi
+          if [[ "${{ steps.paths.outputs.recruiter }}" == "true" ]]; then add_svc linkedin-sim-recruiter-company; fi
+          if [[ "${{ steps.paths.outputs.jobs }}" == "true" ]]; then add_svc linkedin-sim-jobs; fi
+          if [[ "${{ steps.paths.outputs.applications }}" == "true" ]]; then add_svc linkedin-sim-applications; fi
+          if [[ "${{ steps.paths.outputs.messaging }}" == "true" ]]; then add_svc linkedin-sim-messaging-connections; fi
+          if [[ "${{ steps.paths.outputs.analytics }}" == "true" ]]; then add_svc linkedin-sim-analytics; fi
+          if [[ "${{ steps.paths.outputs.ai }}" == "true" ]]; then add_svc linkedin-sim-ai-orchestrator; fi
+          if [[ "${{ steps.paths.outputs.frontend }}" == "true" ]]; then add_svc linkedin-sim-frontend; fi
+          # deploy_services.py-only edits do not change task definitions or images — no ECS rollout.
+          if [[ ${#svc[@]} -eq 0 ]]; then
+            echo "No deployable paths in this push; skipping image build and ECS deploy."
+            exit 0
+          fi
+          IFS=,
+          echo "selection=${svc[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Amazon ECR
+        if: steps.pick.outputs.selection != ''
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build metadata
+        if: steps.pick.outputs.selection != ''
+        id: meta
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${GITHUB_SHA}"
+          REG="${{ steps.login-ecr.outputs.registry }}"
+          echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${REG}/${{ vars.ECR_FRONTEND_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "mysql=${REG}/${{ vars.ECR_MYSQL_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "mongo=${REG}/${{ vars.ECR_MONGO_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push images
+        if: steps.pick.outputs.selection != ''
+        run: |
+          set -euo pipefail
+          REG="${{ steps.login-ecr.outputs.registry }}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          HOST="${{ vars.APP_HOST }}"
+          for target in auth_service recruiter_company_service member_profile_service jobs_service applications_service messaging_connections_service analytics_service ai_orchestrator_service; do
+            docker build --target "$target" -t "${REG}/linkedin-sim/${target}:${TAG}" ./backend
+            docker push "${REG}/linkedin-sim/${target}:${TAG}"
+          done
+          docker build \
+            --build-arg "REACT_APP_AUTH_URL=http://${HOST}:8001" \
+            --build-arg "REACT_APP_MEMBER_URL=http://${HOST}:8002" \
+            --build-arg "REACT_APP_RECRUITER_URL=http://${HOST}:8003" \
+            --build-arg "REACT_APP_JOB_URL=http://${HOST}:8004" \
+            --build-arg "REACT_APP_APP_URL=http://${HOST}:8005" \
+            --build-arg "REACT_APP_MSG_URL=http://${HOST}:8006" \
+            --build-arg "REACT_APP_ANALYTICS_URL=http://${HOST}:8007" \
+            --build-arg "REACT_APP_AI_URL=http://${HOST}:8008" \
+            -t "${{ steps.meta.outputs.frontend }}" ./frontend
+          docker push "${{ steps.meta.outputs.frontend }}"
+          docker build -f infra/ecs-ec2/Dockerfile.mysql -t "${{ steps.meta.outputs.mysql }}" .
+          docker push "${{ steps.meta.outputs.mysql }}"
+          docker build -f infra/ecs-ec2/Dockerfile.mongo -t "${{ steps.meta.outputs.mongo }}" .
+          docker push "${{ steps.meta.outputs.mongo }}"
+          {
+            echo "FRONTEND_IMAGE=${REG}/${{ vars.ECR_FRONTEND_REPOSITORY }}:${TAG}"
+            echo "MYSQL_IMAGE=${REG}/${{ vars.ECR_MYSQL_REPOSITORY }}:${TAG}"
+            echo "MONGO_IMAGE=${REG}/${{ vars.ECR_MONGO_REPOSITORY }}:${TAG}"
+            echo "BACKEND_IMAGE_AUTH_SERVICE=${REG}/linkedin-sim/auth_service:${TAG}"
+            echo "BACKEND_IMAGE_RECRUITER_COMPANY_SERVICE=${REG}/linkedin-sim/recruiter_company_service:${TAG}"
+            echo "BACKEND_IMAGE_MEMBER_PROFILE_SERVICE=${REG}/linkedin-sim/member_profile_service:${TAG}"
+            echo "BACKEND_IMAGE_JOBS_SERVICE=${REG}/linkedin-sim/jobs_service:${TAG}"
+            echo "BACKEND_IMAGE_APPLICATIONS_SERVICE=${REG}/linkedin-sim/applications_service:${TAG}"
+            echo "BACKEND_IMAGE_MESSAGING_CONNECTIONS_SERVICE=${REG}/linkedin-sim/messaging_connections_service:${TAG}"
+            echo "BACKEND_IMAGE_ANALYTICS_SERVICE=${REG}/linkedin-sim/analytics_service:${TAG}"
+            echo "BACKEND_IMAGE_AI_ORCHESTRATOR_SERVICE=${REG}/linkedin-sim/ai_orchestrator_service:${TAG}"
+          } >> "$GITHUB_ENV"
+
+      - name: Render ECS task definitions
+        if: steps.pick.outputs.selection != ''
+        run: |
+          set -euo pipefail
+          export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          export AWS_REGION="${{ vars.AWS_REGION }}"
+          export APP_HOST="${{ vars.APP_HOST }}"
+          export ECS_HOST_PRIVATE_IP="${{ vars.ECS_HOST_PRIVATE_IP }}"
+          export OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}"
+          python3 infra/ecs-ec2/render_taskdefs.py
+
+      - name: Deploy selected ECS services
+        if: steps.pick.outputs.selection != ''
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          DEPLOY_SELECTION: ${{ steps.pick.outputs.selection }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          export AWS_REGION="${{ vars.AWS_REGION }}"
+          python3 infra/ecs-ec2/deploy_services.py

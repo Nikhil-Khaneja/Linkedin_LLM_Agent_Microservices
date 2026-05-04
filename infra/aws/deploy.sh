@@ -7,6 +7,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+echo "==> Checking AWS credentials…"
+if ! caller_arn=$(aws sts get-caller-identity --query Arn --output text --no-cli-pager 2>/dev/null); then
+  echo "Error: AWS CLI has no valid credentials (Terraform needs the same)."
+  echo "  • Long-lived keys: run aws configure and set access key + secret + region."
+  echo "  • SSO: run aws sso login --profile YOUR_PROFILE then export AWS_PROFILE=YOUR_PROFILE"
+  exit 1
+fi
+echo "    $caller_arn"
+echo ""
+
 if [[ "${1:-}" == "--destroy" ]]; then
   echo "==> Destroying AWS infrastructure…"
   terraform destroy -auto-approve
