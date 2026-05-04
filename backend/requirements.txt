@@ -17,5 +17,6 @@ email-validator>=2.2,<3
 
 minio>=7.2,<8
 PyMySQL==1.1.1
+DBUtils==3.1.0
 pypdf==5.4.0
 python-docx==1.1.2

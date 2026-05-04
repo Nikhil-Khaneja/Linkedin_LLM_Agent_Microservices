@@ -19,38 +19,46 @@ services:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"
 
   member_profile_service:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"
 
   recruiter_company_service:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"
 
   jobs_service:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"
 
   applications_service:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"
 
   messaging_connections_service:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"
 
   analytics_service:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"
 
   ai_orchestrator_service:
     environment:
       CACHE_MODE: memory
       EVENT_BUS_MODE: memory
+      ALLOW_MEMORY_CACHE: "true"

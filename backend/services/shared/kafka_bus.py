@@ -9,7 +9,9 @@ from services.shared.observability import get_logger, log_event
 
 MODE = os.environ.get("EVENT_BUS_MODE", "kafka").lower()
 BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-_ALLOW_MEMORY = os.environ.get("APP_ENV") == "test" or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+_ALLOW_MEMORY = (os.environ.get("APP_ENV") == "test"
+                 or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+                 or os.environ.get("ALLOW_MEMORY_CACHE") == "true")
 
 _topics: dict[str, list[dict[str, Any]]] = defaultdict(list)
 _group_offsets: dict[tuple[str, str], int] = defaultdict(int)

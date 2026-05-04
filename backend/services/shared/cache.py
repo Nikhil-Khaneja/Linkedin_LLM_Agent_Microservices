@@ -8,7 +8,9 @@ from collections import defaultdict
 from typing import Any
 
 CACHE_MODE = os.environ.get('CACHE_MODE', 'redis').lower()
-_ALLOW_MEMORY = os.environ.get('APP_ENV') == 'test' or bool(os.environ.get('PYTEST_CURRENT_TEST'))
+_ALLOW_MEMORY = (os.environ.get('APP_ENV') == 'test'
+                 or bool(os.environ.get('PYTEST_CURRENT_TEST'))
+                 or os.environ.get('ALLOW_MEMORY_CACHE') == 'true')
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 DEFAULT_TTL = int(os.environ.get('CACHE_DEFAULT_TTL_SECONDS', '120'))
 

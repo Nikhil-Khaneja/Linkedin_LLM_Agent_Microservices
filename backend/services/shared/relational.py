@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 import pymysql
 from pymysql.cursors import DictCursor
+from dbutils.pooled_db import PooledDB
 
 _named_param_re = re.compile(r":([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -209,8 +210,33 @@ def _db_config() -> dict[str, Any]:
     }
 
 
+_pool: PooledDB | None = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool() -> PooledDB:
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                cfg = _db_config()
+                cfg.pop("autocommit", None)  # PooledDB manages autocommit itself
+                _pool = PooledDB(
+                    creator=pymysql,
+                    maxconnections=int(os.environ.get("MYSQL_POOL_MAX", "50")),
+                    mincached=int(os.environ.get("MYSQL_POOL_MIN", "5")),
+                    maxcached=20,
+                    blocking=True,   # queue requests instead of crashing
+                    ping=1,          # verify connection before handing out
+                    **cfg,
+                )
+    return _pool
+
+
 def connection():
-    return pymysql.connect(**_db_config())
+    if _is_test():
+        return None
+    return _get_pool().connection()
 
 
 def is_mysql() -> bool:

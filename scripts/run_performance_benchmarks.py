@@ -37,7 +37,7 @@ from services.shared.auth import issue_access_token  # noqa: E402
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-THREADS    = 100   # concurrent threads (matches JMeter plan)
+THREADS    = 100   # concurrent threads (override with --threads)
 LOOPS_A    = 10    # loops per thread for Scenario A
 LOOPS_B    = 5     # loops per thread for Scenario B
 RAMP_SECS  = 20    # ramp-up seconds (stagger thread start)
@@ -326,12 +326,21 @@ def store_report(report: dict, analytics_base: str, headers: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global THREADS, LOOPS_A, LOOPS_B, RAMP_SECS  # allow CLI to override module constants
     parser = argparse.ArgumentParser(
-        description='Person 4 — concurrent benchmark runner (100 threads)')
+        description='Person 4 — concurrent benchmark runner')
     parser.add_argument('--config', choices=list(CONFIG_DESCRIPTIONS.keys()),
                         help='Single config to run')
     parser.add_argument('--all', action='store_true',
                         help='Run all 4 configs in sequence')
+    parser.add_argument('--threads', type=int, default=THREADS,
+                        help='Number of concurrent threads (default 100)')
+    parser.add_argument('--loops-a', type=int, default=LOOPS_A,
+                        help='Loops per thread for Scenario A (default 10)')
+    parser.add_argument('--loops-b', type=int, default=LOOPS_B,
+                        help='Loops per thread for Scenario B (default 5)')
+    parser.add_argument('--ramp',    type=float, default=RAMP_SECS,
+                        help='Ramp-up seconds (default 20)')
     parser.add_argument('--analytics-base', default='http://localhost:8007')
     parser.add_argument('--jobs-base',       default='http://localhost:8004')
     parser.add_argument('--app-base',        default='http://localhost:8005')
@@ -340,6 +349,11 @@ def main() -> None:
                         default='tests/jmeter/scenario_b_data.csv',
                         help='CSV file with member_id,job_id,idempotency_key columns')
     args = parser.parse_args()
+
+    THREADS   = args.threads
+    LOOPS_A   = args.loops_a
+    LOOPS_B   = args.loops_b
+    RAMP_SECS = args.ramp
 
     if not args.all and not args.config:
         parser.error('Provide --config <name> or --all')
