@@ -35,6 +35,8 @@ jobs:
         id: paths
         with:
           filters: |
+            workflow_deploy:
+              - '.github/workflows/deploy-ecs-ec2.yml'
             render_code:
               - 'infra/ecs-ec2/render_taskdefs.py'
             deploy_code:
@@ -82,7 +84,8 @@ jobs:
             exit 0
           fi
           # Template or renderer changes can alter every task definition — roll all apps + frontend.
-          if [[ "${{ steps.paths.outputs.taskdef }}" == "true" || "${{ steps.paths.outputs.render_code }}" == "true" ]]; then
+          # Same when this workflow file changes (path filter did not include it before).
+          if [[ "${{ steps.paths.outputs.taskdef }}" == "true" || "${{ steps.paths.outputs.render_code }}" == "true" || "${{ steps.paths.outputs.workflow_deploy }}" == "true" ]]; then
             echo "selection=ALL_APPS" >> "$GITHUB_OUTPUT"
             exit 0
           fi
