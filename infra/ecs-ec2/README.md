@@ -57,6 +57,7 @@ Add these in **Settings → Secrets and variables → Actions → Variables**:
 | `ECR_FRONTEND_REPOSITORY` | `linkedin-sim/frontend` |
 | `ECR_MYSQL_REPOSITORY` | `linkedin-sim/mysql` |
 | `ECR_MONGO_REPOSITORY` | `linkedin-sim/mongo` |
+| `PUBLIC_HTTP_SCHEME` | Optional. Set to `https` after you terminate TLS (see **HTTPS** below). Defaults to `http`. Must match what the browser uses so `REACT_APP_*` and CORS stay aligned. |
 
 Backend Python services use **eight separate ECR repositories** created by `bootstrap.sh`: `linkedin-sim/auth_service`, `linkedin-sim/member_profile_service`, … (see `bootstrap.sh`). CI builds with `docker build --target <service> ./backend` and does **not** use a single `linkedin-sim/backend` repository anymore.
 
@@ -65,6 +66,16 @@ Backend Python services use **eight separate ECR repositories** created by `boot
 1. Re-run **`bash infra/ecs-ec2/bootstrap.sh`** (same env as before) so the eight per-service ECR repos exist.
 2. In GitHub Actions variables, **remove `ECR_BACKEND_REPOSITORY`** if present; CI no longer reads it.
 3. Run a deploy (push to `main` or **workflow_dispatch**). After it succeeds, you can delete the legacy **`linkedin-sim/backend`** ECR repository in the AWS console (optional).
+
+### HTTPS (`https://your-domain`)
+
+Browsers **block mixed content**: if the UI loads over **HTTPS**, API calls must use **HTTPS** too (not `http://…:8001`).
+
+1. **Terminate TLS** in front of the EC2 instance, e.g. **Application Load Balancer + ACM certificate**, **Cloudflare**, or **Caddy/nginx + Let’s Encrypt** on the host. You must expose **TLS on the same hostnames/ports** the React app calls (today that is **port 80** for the UI and **8001–8008** for APIs), or put a **reverse proxy** on **443** that routes to those ports and then point the app at **HTTPS URLs** only.
+2. In GitHub Actions **Variables**, set **`PUBLIC_HTTP_SCHEME`** to **`https`** and keep **`APP_HOST`** as your public hostname (comma-list domain + IP if needed). Redeploy so CI bakes **`https://…:8001`** into the frontend and `render_taskdefs.py` updates **`PUBLIC_BASE_URL` / `MEMBER_PUBLIC_URL`** and CORS.
+3. Open the site only over **`https://`** once step 1 is working end-to-end.
+
+Until TLS works on those endpoints, use **`http://`** for both the domain and APIs, or the browser will block requests.
 
 ### Local verification (no AWS)
 

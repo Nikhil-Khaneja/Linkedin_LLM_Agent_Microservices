@@ -15,7 +15,14 @@ function serviceBase(envUrl, port) {
   if (loopbackHost(h)) {
     return envUrl || `http://localhost:${port}`;
   }
-  return `http://${h}:${port}`;
+  // Production: use full URL from build (e.g. https://auth.example.com) when CI set REACT_APP_*.
+  // Otherwise same host + port as the page (https page => https://host:port — needs TLS on that port or a proxy).
+  const baked = (envUrl || '').trim();
+  if (/^https?:\/\//i.test(baked)) {
+    return baked.replace(/\/$/, '');
+  }
+  const proto = window.location.protocol || 'http:';
+  return `${proto}//${h}:${port}`;
 }
 
 const BASE = {
