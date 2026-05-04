@@ -62,7 +62,7 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const { memberId } = useParams();
 
-  const currentId = user?.userId || user?.principalId;
+  const currentId = user?.principalId || user?.userId;
   const viewedId = memberId || currentId;
   const token = localStorage.getItem('access_token');
   const authCfg = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
