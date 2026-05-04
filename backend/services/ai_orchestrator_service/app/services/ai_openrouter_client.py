@@ -102,6 +102,52 @@ class OpenRouterClient:
             log_event(self.logger, 'openrouter_request_success', trace_id=trace_id, has_shortlist=bool((result or {}).get('shortlist')))
             return result
 
+    async def redraft_message(self, job: dict, candidate: dict, current_draft: str, instructions: str, *, trace_id: str) -> str | None:
+        self.refresh()
+        if not self.enabled:
+            return None
+        system = (
+            'You are a recruiter revising an outreach message to a job candidate. '
+            'Given the current draft and the recruiter\'s revision instructions, rewrite the message. '
+            'Return strict JSON with a single key "message" containing the revised message text. '
+            'Keep the message professional. Do not invent facts.'
+        )
+        prompt = {
+            'job_title': job.get('title'),
+            'candidate_name': candidate.get('name'),
+            'current_draft': current_draft,
+            'revision_instructions': instructions,
+        }
+        log_event(self.logger, 'openrouter_redraft_start', trace_id=trace_id, model=self.model, candidate_id=candidate.get('candidate_id'))
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {self._api_key}',
+                    'Content-Type': 'application/json',
+                    **({'HTTP-Referer': self.public_base_url} if self.public_base_url else {}),
+                    'X-Title': 'LinkedIn Recruiter Copilot',
+                },
+                json={
+                    'model': self.model,
+                    'response_format': {'type': 'json_object'},
+                    'messages': [
+                        {'role': 'system', 'content': system},
+                        {'role': 'user', 'content': json.dumps(prompt)},
+                    ],
+                    'temperature': 0.4,
+                },
+            )
+            log_event(self.logger, 'openrouter_redraft_response', trace_id=trace_id, status_code=response.status_code)
+            response.raise_for_status()
+            data = response.json()
+            content = (((data.get('choices') or [{}])[0].get('message') or {}).get('content') or '{}')
+            if isinstance(content, list):
+                content = ''.join(part.get('text', '') for part in content if isinstance(part, dict))
+            parsed = json.loads(content)
+            msg = parsed.get('message') or parsed.get('draft') or parsed.get('text')
+            return str(msg) if msg else None
+
     async def coach_generate(self, member: dict, job: dict, missing_skills: list[str], *, trace_id: str) -> dict[str, Any] | None:
         """Career Coach prompt — returns {suggested_headline, resume_tips} or None.
 

@@ -24,9 +24,17 @@ def match_quality(authorization: str | None = Header(None), x_trace_id: str | No
 async def coach_suggest(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
     return await svc.coach_suggest(payload, authorization, trace_id(x_trace_id))
 
+@router.get('/ai/coach/history')
+def coach_history(authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
+    return svc.coach_history(authorization, trace_id(x_trace_id))
+
 @router.get('/ai/tasks/{task_id}')
 def get_task(task_id: str, authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
     return svc.get_task(task_id, authorization, trace_id(x_trace_id))
+
+@router.post('/ai/tasks/{task_id}/redraft')
+async def redraft_draft(task_id: str, payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
+    return await svc.redraft_draft(task_id, payload, authorization, trace_id(x_trace_id))
 
 @router.post('/ai/tasks/{task_id}/approve')
 async def approve_task(task_id: str, payload: dict = Body(default={}), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_ai_service)):
