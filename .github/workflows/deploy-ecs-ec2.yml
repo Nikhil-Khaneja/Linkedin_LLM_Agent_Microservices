@@ -167,7 +167,15 @@ jobs:
             echo "ECR repository exists: $KV_REPO"
           else
             echo "Creating ECR repository: $KV_REPO"
-            aws ecr create-repository --repository-name "$KV_REPO" --image-scanning-configuration scanOnPush=true
+            if aws ecr create-repository --repository-name "$KV_REPO" --image-scanning-configuration scanOnPush=true; then
+              echo "Created ECR repository: $KV_REPO"
+            else
+              echo "" >&2
+              echo "::error::ECR CreateRepository failed (often AccessDenied). Pick one fix:" >&2
+              echo "  A) AWS Console → ECR → Create repository → exact name: ${KV_REPO} (Private). Re-run this workflow. No IAM change." >&2
+              echo "  B) Re-run infra/ecs-ec2/bootstrap.sh with an IAM admin so githubActionsEcsDeployRole policy linkedinSimEcsDeploy is refreshed (includes ecr:CreateRepository + ecr:DescribeRepositories)." >&2
+              exit 1
+            fi
           fi
 
       - name: Build metadata
