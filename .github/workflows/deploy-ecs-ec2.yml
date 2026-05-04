@@ -14,9 +14,6 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -24,11 +21,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # GitHub "Variables" values often contain pasted CR/LF; that breaks AWS_REGION (boto) and GITHUB_OUTPUT.
+      - name: Normalize repository variables
+        run: |
+          set -euo pipefail
+          _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+          {
+            echo "AWS_REGION=$(_trim "${{ vars.AWS_REGION }}")"
+            echo "AWS_ROLE_ARN=$(_trim "${{ vars.AWS_ROLE_ARN }}")"
+            echo "ECS_CLUSTER=$(_trim "${{ vars.ECS_CLUSTER }}")"
+            echo "APP_HOST=$(_trim "${{ vars.APP_HOST }}")"
+            echo "ECS_HOST_PRIVATE_IP=$(_trim "${{ vars.ECS_HOST_PRIVATE_IP }}")"
+            echo "ECR_FRONTEND_REPOSITORY=$(_trim "${{ vars.ECR_FRONTEND_REPOSITORY }}")"
+            echo "ECR_MYSQL_REPOSITORY=$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
+            echo "ECR_MONGO_REPOSITORY=$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
+          } >> "$GITHUB_ENV"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Path filters
         uses: dorny/paths-filter@v3
@@ -135,18 +148,13 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          # Strip CR/LF/trim — hidden newlines in GitHub repo variables split $GITHUB_OUTPUT and cause
-          # "Invalid format ':<sha>'" (a second line with no key=).
           _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
           IMAGE_TAG="${GITHUB_SHA}"
           REG="$(_trim "${{ steps.login-ecr.outputs.registry }}")"
-          FRONT="$(_trim "${{ vars.ECR_FRONTEND_REPOSITORY }}")"
-          MYSQLR="$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
-          MONGOR="$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
           echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "frontend=${REG}/${FRONT}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "mysql=${REG}/${MYSQLR}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "mongo=${REG}/${MONGOR}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${REG}/${ECR_FRONTEND_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "mysql=${REG}/${ECR_MYSQL_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "mongo=${REG}/${ECR_MONGO_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push images
         if: steps.pick.outputs.selection != ''
@@ -155,10 +163,10 @@ jobs:
           _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
           REG="$(_trim "${{ steps.login-ecr.outputs.registry }}")"
           TAG="${{ steps.meta.outputs.tag }}"
-          HOST="$(_trim "${{ vars.APP_HOST }}")"
-          FRONT="$(_trim "${{ vars.ECR_FRONTEND_REPOSITORY }}")"
-          MYSQLR="$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
-          MONGOR="$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
+          HOST="${APP_HOST}"
+          FRONT="${ECR_FRONTEND_REPOSITORY}"
+          MYSQLR="${ECR_MYSQL_REPOSITORY}"
+          MONGOR="${ECR_MONGO_REPOSITORY}"
           for target in auth_service recruiter_company_service member_profile_service jobs_service applications_service messaging_connections_service analytics_service ai_orchestrator_service; do
             docker build --target "$target" -t "${REG}/linkedin-sim/${target}:${TAG}" ./backend
             docker push "${REG}/linkedin-sim/${target}:${TAG}"
@@ -197,19 +205,14 @@ jobs:
         run: |
           set -euo pipefail
           export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-          export AWS_REGION="${{ vars.AWS_REGION }}"
-          export APP_HOST="${{ vars.APP_HOST }}"
-          export ECS_HOST_PRIVATE_IP="${{ vars.ECS_HOST_PRIVATE_IP }}"
           export OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}"
           python3 infra/ecs-ec2/render_taskdefs.py
 
       - name: Deploy selected ECS services
         if: steps.pick.outputs.selection != ''
         env:
-          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
           DEPLOY_SELECTION: ${{ steps.pick.outputs.selection }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          export AWS_REGION="${{ vars.AWS_REGION }}"
           python3 infra/ecs-ec2/deploy_services.py
