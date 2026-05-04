@@ -166,8 +166,8 @@ doc = {
   'Statement': [
     {'Effect': 'Allow', 'Action': ['sts:GetCallerIdentity'], 'Resource': '*'},
     {'Effect': 'Allow', 'Action': ['ecr:GetAuthorizationToken'], 'Resource': '*'},
-    # CI can create missing repos (e.g. linkedin-sim/kafka-topics-viewer) if bootstrap was run before they existed.
-    {'Effect': 'Allow', 'Action': ['ecr:DescribeRepositories', 'ecr:CreateRepository'], 'Resource': '*'},
+    # CI verifies repos exist before push (e.g. kafka-topics-viewer); CreateRepository stays admin/bootstrap only.
+    {'Effect': 'Allow', 'Action': ['ecr:DescribeRepositories'], 'Resource': '*'},
     {'Effect': 'Allow', 'Action': ['ecr:BatchCheckLayerAvailability','ecr:CompleteLayerUpload','ecr:InitiateLayerUpload','ecr:PutImage','ecr:UploadLayerPart','ecr:BatchGetImage'],
      'Resource': f'arn:aws:ecr:{region}:{account}:repository/linkedin-sim/*'},
     {'Effect': 'Allow', 'Action': ['ecs:DescribeClusters','ecs:DescribeServices','ecs:DescribeTaskDefinition','ecs:DescribeTasks','ecs:ListTasks','ecs:RegisterTaskDefinition','ecs:UpdateService','ecs:CreateService','ecs:TagResource'], 'Resource': '*'},
