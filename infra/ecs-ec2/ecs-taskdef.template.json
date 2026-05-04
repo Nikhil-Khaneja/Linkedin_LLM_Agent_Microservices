@@ -225,7 +225,7 @@
         ],
         "interval": 20,
         "timeout": 10,
-        "retries": 15,
+        "retries": 10,
         "startPeriod": 120
       }
     },
