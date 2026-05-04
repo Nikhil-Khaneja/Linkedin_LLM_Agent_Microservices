@@ -35,6 +35,15 @@ jobs:
             echo "ECR_FRONTEND_REPOSITORY=$(_trim "${{ vars.ECR_FRONTEND_REPOSITORY }}")"
             echo "ECR_MYSQL_REPOSITORY=$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
             echo "ECR_MONGO_REPOSITORY=$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
+            echo "REACT_APP_API_BASE=$(_trim "${{ vars.REACT_APP_API_BASE }}")"
+            echo "REACT_APP_AUTH_URL=$(_trim "${{ vars.REACT_APP_AUTH_URL }}")"
+            echo "REACT_APP_MEMBER_URL=$(_trim "${{ vars.REACT_APP_MEMBER_URL }}")"
+            echo "REACT_APP_RECRUITER_URL=$(_trim "${{ vars.REACT_APP_RECRUITER_URL }}")"
+            echo "REACT_APP_JOB_URL=$(_trim "${{ vars.REACT_APP_JOB_URL }}")"
+            echo "REACT_APP_APP_URL=$(_trim "${{ vars.REACT_APP_APP_URL }}")"
+            echo "REACT_APP_MSG_URL=$(_trim "${{ vars.REACT_APP_MSG_URL }}")"
+            echo "REACT_APP_ANALYTICS_URL=$(_trim "${{ vars.REACT_APP_ANALYTICS_URL }}")"
+            echo "REACT_APP_AI_URL=$(_trim "${{ vars.REACT_APP_AI_URL }}")"
           } >> "$GITHUB_ENV"
           phs="$(_trim "${{ vars.PUBLIC_HTTP_SCHEME }}")"
           if [[ -n "$phs" ]]; then echo "PUBLIC_HTTP_SCHEME=$phs" >> "$GITHUB_ENV"; fi
@@ -168,13 +177,29 @@ jobs:
           FRONT="${ECR_FRONTEND_REPOSITORY}"
           MYSQLR="${ECR_MYSQL_REPOSITORY}"
           MONGOR="${ECR_MONGO_REPOSITORY}"
+          API_BASE="${REACT_APP_API_BASE:-}"
+          AUTH_URL="${REACT_APP_AUTH_URL:-$API_BASE}"
+          MEMBER_URL="${REACT_APP_MEMBER_URL:-$API_BASE}"
+          RECRUITER_URL="${REACT_APP_RECRUITER_URL:-$API_BASE}"
+          JOB_URL="${REACT_APP_JOB_URL:-$API_BASE}"
+          APP_URL="${REACT_APP_APP_URL:-$API_BASE}"
+          MSG_URL="${REACT_APP_MSG_URL:-$API_BASE}"
+          ANALYTICS_URL="${REACT_APP_ANALYTICS_URL:-$API_BASE}"
+          AI_URL="${REACT_APP_AI_URL:-$API_BASE}"
           for target in auth_service recruiter_company_service member_profile_service jobs_service applications_service messaging_connections_service analytics_service ai_orchestrator_service; do
             docker build --target "$target" -t "${REG}/linkedin-sim/${target}:${TAG}" ./backend
             docker push "${REG}/linkedin-sim/${target}:${TAG}"
           done
-          # Build frontend without baking a single host into REACT_APP_* so it works
-          # from both domain and direct IP while DNS/TLS propagates.
-          docker build -t "${{ steps.meta.outputs.frontend }}" ./frontend
+          docker build \
+            --build-arg REACT_APP_AUTH_URL="${AUTH_URL}" \
+            --build-arg REACT_APP_MEMBER_URL="${MEMBER_URL}" \
+            --build-arg REACT_APP_RECRUITER_URL="${RECRUITER_URL}" \
+            --build-arg REACT_APP_JOB_URL="${JOB_URL}" \
+            --build-arg REACT_APP_APP_URL="${APP_URL}" \
+            --build-arg REACT_APP_MSG_URL="${MSG_URL}" \
+            --build-arg REACT_APP_ANALYTICS_URL="${ANALYTICS_URL}" \
+            --build-arg REACT_APP_AI_URL="${AI_URL}" \
+            -t "${{ steps.meta.outputs.frontend }}" ./frontend
           docker push "${{ steps.meta.outputs.frontend }}"
           docker build -f infra/ecs-ec2/Dockerfile.mysql -t "${{ steps.meta.outputs.mysql }}" .
           docker push "${{ steps.meta.outputs.mysql }}"
