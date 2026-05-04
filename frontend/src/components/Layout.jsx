@@ -12,6 +12,7 @@ const NetIcon   = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 
 const ChartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>;
 const AIIcon    = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M21 11.18V10a2 2 0 00-.9-1.67L12 3 3.9 8.33A2 2 0 003 10v1.18A3 3 0 001 14v2a3 3 0 002 2.82V20a1 1 0 001 1h1a1 1 0 001-1v-1h12v1a1 1 0 001 1h1a1 1 0 001-1v-1.18A3 3 0 0023 16v-2a3 3 0 00-2-2.82z"/></svg>;
 const BellIcon  = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 22a2 2 0 002-2H10a2 2 0 002 2zm6-6V11a6 6 0 00-5-5.91V4a1 1 0 00-2 0v1.09A6 6 0 006 11v5l-2 2v1h16v-1l-2-2z"/></svg>;
+const PerfIcon  = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M13 2.05V4.07A8 8 0 0120 12h2a10 10 0 00-9-9.95zM11 2.05A10 10 0 002 12c0 5.52 4.48 10 10 10a10 10 0 009.93-9H11V2.05zM11 12H2.05c.49 4.61 4.34 8.46 8.95 8.95V12z"/></svg>;
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -132,13 +133,15 @@ export default function Layout() {
     { to:'/connections', label:'Network',   icon:<NetIcon /> },
     { to:'/messages',    label:'Messaging', icon:<MsgIcon /> },
     { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
+    { to:'/performance', label:'Perf',      icon:<PerfIcon /> },
   ];
   const recruiterNav = [
     { to:'/ai',        label:'Home',      icon:<HomeIcon /> },
     { to:'/recruiter', label:'Manage',    icon:<BriefIcon /> },
     { to:'/ai',        label:'AI Copilot',icon:<AIIcon /> },
-    { to:'/analytics', label:'Analytics', icon:<ChartIcon /> },
-    { to:'/connections', label:'Network', icon:<NetIcon /> },
+    { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
+    { to:'/performance', label:'Perf',      icon:<PerfIcon /> },
+    { to:'/connections', label:'Network',   icon:<NetIcon /> },
     { to:'/messages',  label:'Messaging', icon:<MsgIcon /> },
   ];
   const navItems = user?.userType === 'recruiter' ? recruiterNav : memberNav;

@@ -1,161 +1,259 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
-import toast from 'react-hot-toast';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
 
-const S = {
-  lbl: { display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(0,0,0,0.75)', marginBottom: 4 },
-  sel: { width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(0,0,0,0.15)', fontSize: 14, background: '#fff' },
-  chip: { display: 'inline-block', padding: '4px 10px', borderRadius: 999, background: '#0a66c218', color: '#0a66c2', fontSize: 12, fontWeight: 600, marginRight: 6, marginBottom: 6 },
-  chipMissing: { display: 'inline-block', padding: '4px 10px', borderRadius: 999, background: '#e68a0018', color: '#b45309', fontSize: 12, fontWeight: 600, marginRight: 6, marginBottom: 6 },
-  tipLi: { marginBottom: 8, lineHeight: 1.5, fontSize: 14, color: 'rgba(0,0,0,0.8)' },
-  score: { fontSize: 40, fontWeight: 700, lineHeight: 1 },
-};
+const CACHE_KEY = 'coach_history_v1';
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+
+function timeAgo(d) {
+  if (!d) return '';
+  const diff = Date.now() - new Date(d);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(d).toLocaleDateString();
+}
 
 export default function CareerCoachPage() {
   const { user } = useAuth();
-  const [jobs, setJobs] = useState([]);
-  const [selJob, setSelJob] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [suggestion, setSuggestion] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [selectedTile, setSelectedTile] = useState(null);
 
   const token = localStorage.getItem('access_token');
   const authCfg = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
 
-  useEffect(() => {
-    if (!token) return;
-    let mounted = true;
-    const load = async () => {
-      try {
-        const res = await axios.post(`${BASE.job}/jobs/search`, { page_size: 50 }, authCfg);
-        if (mounted) {
-          const items = res.data?.data?.items || [];
-          setJobs(items);
-          if (!selJob && items[0]) setSelJob(items[0].job_id);
-        }
-      } catch {
-        if (mounted) setJobs([]);
-      }
-    };
-    load();
-    return () => { mounted = false; };
-  }, [token]);
+  const loadHistory = async (forceRefresh = false) => {
+    if (!token) { setHistoryLoading(false); return; }
 
-  const runCoach = async () => {
-    if (!selJob) return toast.error('Select a job first');
-    setLoading(true);
-    setSuggestion(null);
+    if (!forceRefresh) {
+      try {
+        const raw = sessionStorage.getItem(CACHE_KEY);
+        if (raw) {
+          const { items, ts } = JSON.parse(raw);
+          if (Date.now() - ts < CACHE_TTL_MS) {
+            setHistory(items);
+            setHistoryLoading(false);
+            return;
+          }
+        }
+      } catch {}
+    }
+
+    setHistoryLoading(true);
     try {
-      const { data } = await axios.post(
-        `${BASE.ai}/ai/coach/suggest`,
-        { target_job_id: selJob },
-        authCfg,
-      );
-      setSuggestion(data?.data || null);
-      if (!data?.data) toast.error('No suggestions returned');
-    } catch (err) {
-      toast.error(err.response?.data?.error?.message || 'Coach failed');
+      const { data } = await axios.get(`${BASE.ai}/ai/coach/history`, authCfg);
+      const items = data?.data?.items || [];
+      setHistory(items);
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify({ items, ts: Date.now() }));
+    } catch {
+      setHistory([]);
     } finally {
-      setLoading(false);
+      setHistoryLoading(false);
     }
   };
 
-  const selectedJob = jobs.find((job) => job.job_id === selJob);
+  useEffect(() => { loadHistory(); }, [token]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div>
-        <h1 style={{ fontSize: 24, fontWeight: 600 }}>Career Coach</h1>
-        <p style={{ fontSize: 15, color: 'rgba(0,0,0,0.6)', marginTop: 2 }}>
-          Pick a job and we'll suggest a headline, the skills to add, and concrete resume tips — plus show the match score you'd reach.
-        </p>
-      </div>
-
-      <div className="li-card" style={{ padding: 24 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>Optimize for a job</h2>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ flex: 2, minWidth: 280 }}>
-            <label style={S.lbl}>Select a target job</label>
-            <select style={S.sel} value={selJob} onChange={(e) => setSelJob(e.target.value)}>
-              <option value="">— Choose a job —</option>
-              {jobs.map((job) => (
-                <option key={job.job_id} value={job.job_id}>
-                  {job.title} {job.company_name ? `· ${job.company_name}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            onClick={runCoach}
-            disabled={loading || !selJob}
-            className="li-btn-primary"
-            style={{ borderRadius: 4, padding: '11px 28px', fontSize: 16, opacity: loading || !selJob ? 0.6 : 1 }}
-          >
-            {loading ? 'Coaching…' : 'Optimize for this job'}
-          </button>
-        </div>
-        {selectedJob && (
-          <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.55)', marginTop: 10 }}>
-            Target: <strong>{selectedJob.title}</strong>
-            {selectedJob.seniority_level ? ` · ${selectedJob.seniority_level}` : ''}
-            {selectedJob.location ? ` · ${selectedJob.location}` : ''}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 600 }}>Career Coach</h1>
+          <p style={{ fontSize: 15, color: 'rgba(0,0,0,0.6)', marginTop: 2 }}>
+            Your AI match history — click any tile for full analysis. Run a new score via <strong>✨ AI Score</strong> on the{' '}
+            <Link to="/jobs" style={{ color: '#0a66c2' }}>Jobs page</Link>.
           </p>
-        )}
+        </div>
+        <button
+          onClick={() => loadHistory(true)}
+          disabled={historyLoading}
+          style={{ padding: '8px 16px', border: '1.5px solid rgba(0,0,0,0.2)', borderRadius: 20, background: '#fff', cursor: historyLoading ? 'default' : 'pointer', fontSize: 14, fontFamily: 'inherit', color: 'rgba(0,0,0,0.7)', opacity: historyLoading ? 0.5 : 1, flexShrink: 0 }}
+        >
+          {historyLoading ? '⟳ Loading…' : '↺ Refresh'}
+        </button>
       </div>
 
-      {suggestion && (
-        <>
-          <div className="li-card" style={{ padding: 24, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
-            <div>
-              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Current match</p>
-              <p style={{ ...S.score, color: '#0a66c2' }}>{suggestion.current_match_score}</p>
-            </div>
-            <div>
-              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: 0.5 }}>If you improve</p>
-              <p style={{ ...S.score, color: '#057642' }}>{suggestion.match_score_if_improved}</p>
-            </div>
-            <div>
-              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Potential gain</p>
-              <p style={{ ...S.score, color: suggestion.score_delta > 0 ? '#057642' : 'rgba(0,0,0,0.4)' }}>
-                {suggestion.score_delta > 0 ? `+${suggestion.score_delta}` : suggestion.score_delta}
-              </p>
-            </div>
-            <div>
-              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Source</p>
-              <p style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>{suggestion.provider}</p>
-            </div>
+      {historyLoading ? (
+        <div className="li-card" style={{ padding: 60, textAlign: 'center', color: 'rgba(0,0,0,0.5)' }}>
+          <div style={{ width: 32, height: 32, border: '3px solid #e5e7eb', borderTopColor: '#7c3aed', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 14px' }} />
+          Loading your AI match history…
+        </div>
+      ) : history.length === 0 ? (
+        <div className="li-card" style={{ padding: 60, textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🤖</div>
+          <p style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>No AI scores yet</p>
+          <p style={{ color: 'rgba(0,0,0,0.55)', marginBottom: 20 }}>
+            Click <strong>✨ AI Score</strong> on any job listing to get your first match analysis.
+          </p>
+          <Link to="/jobs" className="li-btn-primary" style={{ display: 'inline-block', padding: '10px 24px', borderRadius: 24, textDecoration: 'none', fontSize: 15, fontWeight: 700 }}>
+            Browse Jobs →
+          </Link>
+        </div>
+      ) : (
+        <div>
+          <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.45)', marginBottom: 14 }}>
+            {history.length} job{history.length !== 1 ? 's' : ''} analyzed · click any tile to expand
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 14 }}>
+            {history.map((h) => (
+              <HistoryTile key={h.history_id} h={h} onClick={() => setSelectedTile(h)} />
+            ))}
           </div>
+        </div>
+      )}
 
-          <div className="li-card" style={{ padding: 24 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Suggested headline</h3>
-            <p style={{ fontSize: 16, color: 'rgba(0,0,0,0.85)', marginBottom: 20, fontStyle: 'italic' }}>
-              "{suggestion.suggested_headline}"
+      {selectedTile && <DetailsModal tile={selectedTile} onClose={() => setSelectedTile(null)} />}
+    </div>
+  );
+}
+
+function HistoryTile({ h, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{ background: '#fff', borderRadius: 10, boxShadow: '0 0 0 1px rgba(0,0,0,0.1)', padding: '16px', cursor: 'pointer', transition: 'box-shadow 0.15s, transform 0.1s' }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.15)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.1)'; e.currentTarget.style.transform = 'none'; }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+          <p style={{ fontSize: 14, fontWeight: 700, color: '#0a66c2', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {h.job_title || 'Untitled Job'}
+          </p>
+          {h.company_name && (
+            <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)' }}>{h.company_name}</p>
+          )}
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <p style={{ fontSize: 26, fontWeight: 800, color: '#0a66c2', lineHeight: 1 }}>{h.current_match_score}</p>
+          {h.score_delta > 0 && (
+            <p style={{ fontSize: 11, color: '#057642', fontWeight: 600, marginTop: 1 }}>+{h.score_delta} gain</p>
+          )}
+        </div>
+      </div>
+
+      {h.skills_to_add?.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          {h.skills_to_add.slice(0, 3).map((s) => (
+            <span key={s} style={{ display: 'inline-block', fontSize: 11, fontWeight: 600, color: '#b45309', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 999, padding: '1px 7px', marginRight: 4, marginBottom: 3 }}>{s}</span>
+          ))}
+          {h.skills_to_add.length > 3 && (
+            <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)' }}>+{h.skills_to_add.length - 3} more</span>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+        <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)' }}>{timeAgo(h.searched_at)}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: h.provider === 'heuristic' ? 'rgba(0,0,0,0.35)' : '#7c3aed' }}>
+          {h.provider === 'heuristic' ? '⚙️ Rules' : '✨ AI'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function DetailsModal({ tile, onClose }) {
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.52)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, padding: '28px 32px', maxWidth: 560, width: '100%', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 12px 48px rgba(0,0,0,0.25)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div style={{ flex: 1, paddingRight: 12 }}>
+            <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4, color: 'rgba(0,0,0,0.9)' }}>{tile.job_title}</h3>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.45)' }}>
+              {[tile.company_name, timeAgo(tile.searched_at)].filter(Boolean).join(' · ')}
             </p>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Skills to add</h3>
-            <div style={{ marginBottom: 20 }}>
-              {(suggestion.skills_to_add || []).length === 0 ? (
-                <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }}>You already have every skill this job lists. 🎉</p>
-              ) : (
-                (suggestion.skills_to_add || []).map((skill) => (
-                  <span key={skill} style={S.chipMissing}>{skill}</span>
-                ))
-              )}
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: '#aaa', lineHeight: 1, padding: 0, flexShrink: 0 }}>✕</button>
+        </div>
+
+        {/* Scores */}
+        <div style={{ display: 'flex', gap: 0, marginBottom: 24, background: '#f8f9fa', borderRadius: 10, overflow: 'hidden' }}>
+          <ScoreBlock label="Current match" value={tile.current_match_score} color="#0a66c2" />
+          <ScoreBlock label="If improved" value={tile.match_score_if_improved} color="#057642" />
+          {tile.score_delta > 0 && (
+            <ScoreBlock label="Potential gain" value={`+${tile.score_delta}`} color="#057642" />
+          )}
+        </div>
+
+        {/* Suggested headline */}
+        {tile.suggested_headline && (
+          <Section label="Suggested Headline">
+            <p style={{ fontSize: 15, color: 'rgba(0,0,0,0.85)', fontStyle: 'italic', background: '#f0f4ff', borderRadius: 8, padding: '12px 14px', borderLeft: '3px solid #0a66c2', margin: 0 }}>
+              "{tile.suggested_headline}"
+            </p>
+          </Section>
+        )}
+
+        {/* Skills to add */}
+        {tile.skills_to_add?.length > 0 && (
+          <Section label="Skills to Add">
+            <div>
+              {tile.skills_to_add.map((s) => (
+                <span key={s} style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 999, background: '#fff7ed', color: '#b45309', fontSize: 13, fontWeight: 600, marginRight: 6, marginBottom: 6, border: '1px solid #fed7aa' }}>{s}</span>
+              ))}
             </div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Resume tips</h3>
-            <ul style={{ paddingLeft: 20 }}>
-              {(suggestion.resume_tips || []).map((tip, idx) => (
-                <li key={idx} style={S.tipLi}>{tip}</li>
+          </Section>
+        )}
+
+        {/* Resume tips */}
+        {tile.resume_tips?.length > 0 && (
+          <Section label="Resume Tips">
+            <ul style={{ paddingLeft: 18, margin: 0 }}>
+              {tile.resume_tips.map((tip, i) => (
+                <li key={i} style={{ fontSize: 14, color: 'rgba(0,0,0,0.8)', marginBottom: 10, lineHeight: 1.55 }}>{tip}</li>
               ))}
             </ul>
-            {suggestion.rationale && (
-              <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)', marginTop: 20, borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 12 }}>
-                <strong>Why this score:</strong> {suggestion.rationale}
-              </p>
-            )}
-          </div>
-        </>
-      )}
+          </Section>
+        )}
+
+        {/* Rationale */}
+        {tile.rationale && (
+          <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', background: '#f8f9fa', borderRadius: 6, padding: '10px 12px', lineHeight: 1.55, marginBottom: 20 }}>
+            <strong>Why this score: </strong>{tile.rationale}
+          </p>
+        )}
+
+        {/* Footer */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: tile.provider === 'heuristic' ? 'rgba(0,0,0,0.4)' : '#7c3aed' }}>
+            {tile.provider === 'heuristic' ? '⚙️ Rules-based scoring' : '✨ AI-generated (OpenRouter)'}
+          </span>
+          <button onClick={onClose} style={{ padding: '9px 22px', background: '#0a66c2', color: '#fff', border: 'none', borderRadius: 24, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: 'inherit' }}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreBlock({ label, value, color }) {
+  return (
+    <div style={{ flex: 1, textAlign: 'center', padding: '16px 8px', borderRight: '1px solid rgba(0,0,0,0.06)' }}>
+      <p style={{ fontSize: 10, color: 'rgba(0,0,0,0.45)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>{label}</p>
+      <p style={{ fontSize: 40, fontWeight: 800, color, lineHeight: 1 }}>{value}</p>
+    </div>
+  );
+}
+
+function Section({ label, children }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <p style={{ fontSize: 11, fontWeight: 700, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>{label}</p>
+      {children}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import ConnectionsPage from './pages/ConnectionsPage';
 import NotificationsPage from './pages/NotificationsPage';
 import CareerCoachPage from './pages/CareerCoachPage';
+import PerformancePage from './pages/PerformancePage';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }) {
@@ -33,7 +34,7 @@ function AppRoutes() {
       <Route path="/login"    element={user ? <Navigate to="/" /> : <LoginPage />} />
       <Route path="/register" element={user ? <Navigate to="/" /> : <RegisterPage />} />
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-        <Route index element={user?.userType === 'recruiter' ? <Navigate to="/ai" replace /> : <DashboardPage />} />
+        <Route index element={user?.userType === 'recruiter' ? <Navigate to="/ai" replace /> : <Navigate to="/jobs" replace />} />
         <Route path="jobs"            element={<JobsPage />} />
         <Route path="jobs/:jobId"     element={<JobDetailPage />} />
         <Route path="profile"         element={<ProfilePage />} />
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="connections"     element={<ConnectionsPage />} />
         <Route path="notifications"   element={<NotificationsPage />} />
         <Route path="coach"           element={<CareerCoachPage />} />
+        <Route path="performance"     element={<PerformancePage />} />
       </Route>
     </Routes>
   );

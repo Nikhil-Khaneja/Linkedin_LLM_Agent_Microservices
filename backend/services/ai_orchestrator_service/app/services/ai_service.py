@@ -11,12 +11,13 @@ from fastapi import WebSocket
 from services.ai_orchestrator_service.app.services.ai_matching import CandidateMatchingService
 from services.ai_orchestrator_service.app.services.ai_openrouter_client import OpenRouterClient
 from services.ai_orchestrator_service.app.services.ai_resume_intelligence import collect_resume_text, parse_resume
-from services.shared.cache import get_json, set_json
+from services.shared.cache import delete_key, get_json, set_json
 from services.shared.common import body_hash, build_event, check_idempotency, fail, record_idempotency, require_auth, success, trace_id
 from services.shared.kafka_bus import consume_forever, publish_event
 from services.shared.notifications import create_notification
 from services.shared.observability import get_logger, log_event
 from services.shared.outbox import DocumentOutboxRepository, dispatch_outbox_forever
+from services.shared.document_store import find_many, insert_one
 from services.shared.repositories import ApplicationRepository, JobRepository, MemberRepository, RecruiterRepository
 from services.shared.resume_parser import extract_text_from_response
 
@@ -608,6 +609,30 @@ class AIOrchestratorService:
             'scope': 'all' if actor.get('role') == 'admin' else 'recruiter',
         }, trc)
 
+    def _save_coach_history(self, member_id: str, job: dict, result: dict) -> None:
+        try:
+            from datetime import datetime, timezone
+            record = {
+                'history_id': f'ch_{uuid4().hex[:10]}',
+                'member_id': member_id,
+                'target_job_id': result.get('target_job_id'),
+                'job_title': job.get('title') or '',
+                'company_name': job.get('company_name') or job.get('company_id') or '',
+                'current_match_score': result.get('current_match_score'),
+                'match_score_if_improved': result.get('match_score_if_improved'),
+                'score_delta': result.get('score_delta'),
+                'skills_to_add': list(result.get('skills_to_add') or []),
+                'suggested_headline': result.get('suggested_headline'),
+                'resume_tips': list(result.get('resume_tips') or []),
+                'rationale': result.get('rationale'),
+                'provider': result.get('provider'),
+                'searched_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+            }
+            insert_one('coach_history', record)
+            delete_key(f'coach_hist:{member_id}')
+        except Exception as exc:
+            log_event(self.logger, 'coach_history_save_failed', level=30, error=str(exc))
+
     def _heuristic_coach_text(self, member: dict, job: dict, missing: list[str]) -> tuple[str, list[str]]:
         title = job.get('title') or 'your target role'
         top_skills = (missing or [])[:3]
@@ -671,7 +696,7 @@ class AIOrchestratorService:
             served_by = 'heuristic'
 
         log_event(self.logger, 'career_coach_generated', trace_id=trc, member_id=member_id, job_id=target_job_id, current_score=current_score, improved_score=improved_score, provider=served_by)
-        return success({
+        result_payload = {
             'member_id': member_id,
             'target_job_id': target_job_id,
             'suggested_headline': suggested_headline,
@@ -682,7 +707,82 @@ class AIOrchestratorService:
             'score_delta': improved_score - current_score,
             'rationale': rationale,
             'provider': served_by,
-        }, trc)
+        }
+        self._save_coach_history(member_id, job, result_payload)
+        return success(result_payload, trc)
+
+    def coach_history(self, authorization, trc):
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        member_id = actor.get('sub')
+        if not member_id:
+            return fail('invalid_request', 'Could not determine member identity from token.', trc, status_code=400)
+        cache_key = f'coach_hist:{member_id}'
+        cached = get_json(cache_key)
+        if cached is not None:
+            return success({'items': cached}, trc, {'cache': 'hit', 'total': len(cached)})
+        items = find_many('coach_history', {'member_id': member_id}, sort=[('searched_at', -1)])
+        items = items[:20]
+        set_json(cache_key, items, 300)
+        return success({'items': items}, trc, {'cache': 'miss', 'total': len(items)})
+
+    def _heuristic_redraft(self, current_draft: str, instructions: str, candidate_name: str) -> str:
+        instr = instructions.lower()
+        lines = [l for l in current_draft.strip().split('\n') if l.strip()]
+        if not lines:
+            return current_draft
+        if any(w in instr for w in ('shorter', 'brief', 'concise', 'short')):
+            lines = lines[:2] + ([lines[-1]] if len(lines) > 2 else [])
+        if any(w in instr for w in ('casual', 'friendly', 'informal', 'warm')):
+            if lines[0].lower().startswith('dear'):
+                lines[0] = f'Hi {candidate_name},'
+        elif any(w in instr for w in ('formal', 'professional')):
+            if lines[0].lower().startswith(('hi ', 'hey ')):
+                lines[0] = f'Dear {candidate_name},'
+        return '\n'.join(lines)
+
+    async def redraft_draft(self, task_id: str, payload: dict, authorization, trc):
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        if actor['role'] not in {'recruiter', 'admin'}:
+            return fail('forbidden', 'Recruiter/admin only.', trc, status_code=403)
+        candidate_id = payload.get('candidate_id', '').strip()
+        instructions = payload.get('instructions', '').strip()
+        current_draft = payload.get('current_draft', '').strip()
+        if not candidate_id or not instructions:
+            return fail('bad_request', 'candidate_id and instructions are required.', trc, status_code=400)
+        task = self._normalize_task(self.repo.get_task(task_id))
+        if not task:
+            return fail('not_found', 'Task not found.', trc, status_code=404)
+        job_id = task.get('input', {}).get('job_id')
+        job = self.jobs.get(job_id) if job_id else {}
+        shortlist = task.get('output', {}).get('shortlist') or []
+        if isinstance(shortlist, str):
+            try:
+                import json as _json
+                shortlist = _json.loads(shortlist)
+            except Exception:
+                shortlist = []
+        candidate = next((c for c in shortlist if c.get('candidate_id') == candidate_id), {'candidate_id': candidate_id, 'name': candidate_id})
+        new_message = None
+        try:
+            self.openrouter.refresh()
+            new_message = await self.openrouter.redraft_message(
+                job=job or {},
+                candidate=candidate,
+                current_draft=current_draft,
+                instructions=instructions,
+                trace_id=trc,
+            )
+        except Exception as exc:
+            log_event(self.logger, 'redraft_openrouter_failed', level=30, trace_id=trc, task_id=task_id, error=str(exc))
+        if not new_message:
+            new_message = self._heuristic_redraft(current_draft, instructions, candidate.get('name') or candidate_id)
+        return success({'message': new_message, 'candidate_id': candidate_id, 'provider': self._provider_name()}, trc)
 
     def get_task(self, task_id, authorization, trc):
         try:
