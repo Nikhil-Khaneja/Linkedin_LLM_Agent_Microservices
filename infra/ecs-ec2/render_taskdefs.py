@@ -46,6 +46,8 @@ BACKEND_CONTAINERS = (
 
 PLATFORM = {"mysql", "mongo", "redis", "kafka", "minio"}
 
+# Host ports for platform task (bridge on EC2). Keep in sync with docker-compose published ports
+# for mysql/mongo/redis/kafka/minio and with README curl examples.
 HOST_PORTS = {
     "mysql": [(3306, 3306)],
     "mongo": [(27017, 27017)],
