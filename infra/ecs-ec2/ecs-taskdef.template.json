@@ -289,6 +289,42 @@
       }
     },
     {
+      "name": "kafka_topics_viewer",
+      "image": "__KAFKA_VIEWER_IMAGE__",
+      "memoryReservation": 256,
+      "essential": false,
+      "dependsOn": [
+        {
+          "containerName": "kafka",
+          "condition": "START"
+        }
+      ],
+      "environment": [
+        {
+          "name": "KAFKA_BOOTSTRAP_SERVERS",
+          "value": "kafka:9092"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/linkedin-sim",
+          "awslogs-region": "__AWS_REGION__",
+          "awslogs-stream-prefix": "kafka-topics-viewer"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:3840/api/health', timeout=2)\""
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 5,
+        "startPeriod": 60
+      }
+    },
+    {
       "name": "auth_service",
       "image": "__BACKEND_IMAGE__",
       "memoryReservation": 512,

@@ -74,7 +74,8 @@ if [[ "$DELETE_ECR" == 1 ]]; then
     linkedin-sim/ai_orchestrator_service \
     linkedin-sim/frontend \
     linkedin-sim/mysql \
-    linkedin-sim/mongo; do
+    linkedin-sim/mongo \
+    linkedin-sim/kafka-topics-viewer; do
     aws ecr delete-repository --repository-name "$r" --force --region "$AWS_REGION" >/dev/null 2>&1 || true
   done
 else

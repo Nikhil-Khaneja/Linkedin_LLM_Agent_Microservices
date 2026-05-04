@@ -30,6 +30,7 @@ REQUIRED_COMMON = (
     "FRONTEND_IMAGE",
     "MYSQL_IMAGE",
     "MONGO_IMAGE",
+    "KAFKA_VIEWER_IMAGE",
 )
 
 # Container names in ecs-taskdef.template.json (must match Dockerfile --target names).
@@ -44,7 +45,7 @@ BACKEND_CONTAINERS = (
     "ai_orchestrator_service",
 )
 
-PLATFORM = {"mysql", "mongo", "redis", "kafka", "minio"}
+PLATFORM = {"mysql", "mongo", "redis", "kafka", "minio", "kafka_topics_viewer"}
 
 # Host ports for platform task (bridge on EC2). Keep in sync with docker-compose published ports
 # for mysql/mongo/redis/kafka/minio and with README curl examples.
@@ -54,6 +55,7 @@ HOST_PORTS = {
     "redis": [(6379, 6379)],
     "kafka": [(9092, 9092)],
     "minio": [(9000, 9000), (9001, 9001)],
+    "kafka_topics_viewer": [(3840, 3840)],
 }
 
 
@@ -73,6 +75,7 @@ def _replace_placeholders(obj: dict | list | str) -> dict | list | str:
             "FRONTEND_IMAGE",
             "MYSQL_IMAGE",
             "MONGO_IMAGE",
+            "KAFKA_VIEWER_IMAGE",
             "OPENROUTER_API_KEY",
         ):
             token = f"__{key}__"
@@ -165,9 +168,12 @@ def _rewrite_app_env(container: dict) -> None:
         elif n == "OWNER1_JWKS_URL":
             e["value"] = f"http://{ip}:8001/.well-known/jwks.json"
         elif n == "MEMBER_PUBLIC_URL":
-            # Browser loads signed media via GET /members/media on the published host port; it is HTTP only
-            # until a reverse proxy terminates TLS (do not use PUBLIC_HTTP_SCHEME here).
-            e["value"] = f"http://{pub}:8002"
+            # Direct host:port (HTTP) for local/bridge; behind ALB on 443 use same scheme + host as the SPA
+            # so signed /members/media links are same-origin HTTPS (no mixed content, no wrong apex host).
+            if scheme == "https":
+                e["value"] = f"https://{pub}".rstrip("/")
+            else:
+                e["value"] = f"http://{pub}:8002"
         elif n == "MESSAGING_SERVICE_URL":
             e["value"] = f"http://{ip}:8006"
         elif n == "PUBLIC_BASE_URL":
@@ -184,9 +190,10 @@ def _rewrite_app_env(container: dict) -> None:
             env_list.append({"name": "CORS_ALLOWED_ORIGINS", "value": ",".join(cors)})
 
 
-def _strip_cross_task_fields(container: dict) -> None:
+def _strip_cross_task_fields(container: dict, *, keep_depends_on: bool = False) -> None:
     container.pop("links", None)
-    container.pop("dependsOn", None)
+    if not keep_depends_on:
+        container.pop("dependsOn", None)
 
 
 def _single_taskdef(
@@ -230,9 +237,9 @@ def main() -> int:
 
     # --- Platform task ---
     plat_containers = []
-    for name in ("mysql", "mongo", "redis", "kafka", "minio"):
+    for name in ("mysql", "mongo", "redis", "kafka", "minio", "kafka_topics_viewer"):
         c = by_name[name]
-        _strip_cross_task_fields(c)
+        _strip_cross_task_fields(c, keep_depends_on=True)
         _add_host_ports(c)
         if name == "kafka":
             _patch_platform_kafka_env(c)
@@ -245,7 +252,13 @@ def main() -> int:
         {
             "serviceName": "linkedin-sim-platform",
             "taskFile": str(plat_path.relative_to(ROOT)),
-            "pathFilters": ["infra/mysql", "infra/mongo", "infra/ecs-ec2/ecs-taskdef.template.json", "infra/ecs-ec2/render_taskdefs.py"],
+            "pathFilters": [
+                "infra/mysql",
+                "infra/mongo",
+                "kafka_topics_viewer/**",
+                "infra/ecs-ec2/ecs-taskdef.template.json",
+                "infra/ecs-ec2/render_taskdefs.py",
+            ],
         }
     )
 
