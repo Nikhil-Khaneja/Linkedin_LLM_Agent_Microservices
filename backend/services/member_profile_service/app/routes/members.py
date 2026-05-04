@@ -16,7 +16,7 @@ from pymongo import MongoClient
 from services.shared.common import success, fail, trace_id, require_auth, build_event
 from services.shared.kafka_bus import publish_event
 from services.shared.cache import get_json, set_json
-from services.shared.relational import fetch_one, fetch_all, execute
+from services.shared.relational import fetch_one, fetch_all, execute, is_mysql
 from services.shared.media_signed_url import (
     default_member_public_url,
     member_media_proxy_url,
@@ -30,6 +30,36 @@ from services.shared.resume_parser import extract_text_from_bytes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# PyMySQL builds queries with Python "%" formatting; SQL wildcards in literals must be "%%" → one "%" on the wire.
+_MEMBER_SEARCH_SQL = """
+SELECT * FROM members
+WHERE is_deleted = 0
+  AND member_id LIKE 'mem_%%'
+  AND member_id <> :self_id
+  AND (
+    lower(coalesce(first_name, '')) LIKE :like OR
+    lower(coalesce(last_name, '')) LIKE :like OR
+    lower(coalesce(email, '')) LIKE :like OR
+    lower(coalesce(headline, '')) LIKE :like OR
+    lower(coalesce(about_text, '')) LIKE :like OR
+    lower(coalesce(location_text, '')) LIKE :like OR
+    lower(coalesce(current_company, '')) LIKE :like OR
+    lower(coalesce(current_title, '')) LIKE :like OR
+    __PAYLOAD_EXPR__ LIKE :like
+  )
+ORDER BY first_name ASC, last_name ASC
+LIMIT :limit OFFSET :offset
+""".strip()
+
+_MEMBER_LIST_SQL = """
+SELECT * FROM members
+WHERE is_deleted = 0
+  AND member_id LIKE 'mem_%%'
+  AND member_id <> :self_id
+ORDER BY first_name ASC, last_name ASC
+LIMIT :limit OFFSET :offset
+""".strip()
 
 UPLOAD_DIR = Path(os.environ.get("APP_DATA_DIR", "/app/data")) / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -471,42 +501,24 @@ async def search_members(payload: dict = Body(...), authorization: str | None = 
     page = max(1, page)
     offset = (page - 1) * limit
     self_id = actor["actor_id"]
+    # Cast payload for LIKE: avoids MySQL issues when payload_json is JSON type; NULL-safe lowers.
+    _payload_expr = (
+        "lower(cast(coalesce(payload_json, '') as char(8000)))"
+        if is_mysql()
+        else "lower(coalesce(payload_json, ''))"
+    )
 
     try:
         if keyword:
             like = f"%{keyword}%"
+            sql = _MEMBER_SEARCH_SQL.replace("__PAYLOAD_EXPR__", _payload_expr)
             rows = fetch_all(
-                """
-                SELECT * FROM members
-                WHERE is_deleted = 0
-                  AND member_id LIKE 'mem_%'
-                  AND member_id <> :self_id
-                  AND (
-                    lower(first_name) LIKE :like OR
-                    lower(last_name) LIKE :like OR
-                    lower(email) LIKE :like OR
-                    lower(headline) LIKE :like OR
-                    lower(about_text) LIKE :like OR
-                    lower(location_text) LIKE :like OR
-                    lower(COALESCE(current_company, '')) LIKE :like OR
-                    lower(COALESCE(current_title, '')) LIKE :like OR
-                    lower(COALESCE(payload_json, '')) LIKE :like
-                  )
-                ORDER BY first_name ASC, last_name ASC
-                LIMIT :limit OFFSET :offset
-                """,
+                sql,
                 {"self_id": self_id, "like": like, "limit": limit, "offset": offset},
             )
         else:
             rows = fetch_all(
-                """
-                SELECT * FROM members
-                WHERE is_deleted = 0
-                  AND member_id LIKE 'mem_%'
-                  AND member_id <> :self_id
-                ORDER BY first_name ASC, last_name ASC
-                LIMIT :limit OFFSET :offset
-                """,
+                _MEMBER_LIST_SQL,
                 {"self_id": self_id, "limit": limit, "offset": offset},
             )
     except Exception:
