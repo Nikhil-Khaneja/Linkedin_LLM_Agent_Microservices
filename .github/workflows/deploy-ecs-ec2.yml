@@ -156,29 +156,6 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Verify Kafka viewer ECR repository exists
-        if: steps.pick.outputs.selection != ''
-        run: |
-          set -euo pipefail
-          _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
-          KV_REPO="$(_trim "${ECR_KAFKA_VIEWER_REPOSITORY:-}")"
-          KV_REPO="${KV_REPO:-linkedin-sim/kafka-topics-viewer}"
-          set +e
-          out=$(aws ecr describe-repositories --repository-names "$KV_REPO" 2>&1)
-          code=$?
-          set -e
-          if [[ "$code" -eq 0 ]]; then
-            echo "ECR repository exists: $KV_REPO"
-            exit 0
-          fi
-          echo "$out" >&2
-          if echo "$out" | grep -qi AccessDeniedException; then
-            echo "::error::ecr:DescribeRepositories denied for ${KV_REPO}. Re-run infra/ecs-ec2/bootstrap.sh (refreshes githubActionsEcsDeployRole), or create the repository in the ECR console as an IAM admin."
-            exit 1
-          fi
-          echo "::error::ECR repository missing: ${KV_REPO}. One-time: AWS Console → ECR → Create repository (Private, exact name). Or run bash infra/ecs-ec2/bootstrap.sh (creates all linkedin-sim/* repos). Then re-run this workflow."
-          exit 1
-
       - name: Build metadata
         if: steps.pick.outputs.selection != ''
         id: meta

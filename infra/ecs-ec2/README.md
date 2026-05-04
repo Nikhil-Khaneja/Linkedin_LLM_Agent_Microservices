@@ -57,19 +57,14 @@ Add these in **Settings → Secrets and variables → Actions → Variables**:
 | `ECR_FRONTEND_REPOSITORY` | `linkedin-sim/frontend` |
 | `ECR_MYSQL_REPOSITORY` | `linkedin-sim/mysql` |
 | `ECR_MONGO_REPOSITORY` | `linkedin-sim/mongo` |
-| `ECR_KAFKA_VIEWER_REPOSITORY` | Optional. Defaults in CI to `linkedin-sim/kafka-topics-viewer` if unset. Repo is created by **`bootstrap.sh`** (or once in the **ECR console**); CI only **verifies** it exists before push. |
+| `ECR_KAFKA_VIEWER_REPOSITORY` | Optional. Defaults in CI to `linkedin-sim/kafka-topics-viewer` if unset. Create the repo with **`bootstrap.sh`** or once in the **ECR console** before the first platform deploy that includes the viewer. |
 | `PUBLIC_HTTP_SCHEME` | Optional. Affects **`PUBLIC_BASE_URL`** in rendered task defs (and related “canonical” links). **APIs and media on `:8001`–`:8008` stay `http://`** until you put TLS in front of those ports or route them behind **443**. Defaults to `http`. |
 
 ### Kafka topics viewer on the EC2 host
 
 After the **platform** task is running, the viewer is bound to **host port `3840`** (same as local Compose). Open **`http://<ECS-host-public-IP-or-domain>:3840`** (HTTP only unless you add a TLS listener for that port). Allow **inbound TCP 3840** on the instance security group (`linkedin-sim-ecs-sg` from bootstrap) from your IP or VPN. Redeploy the platform task after this change (**workflow_dispatch** → **Redeploy data plane**, or push under `kafka_topics_viewer/**` / `infra/ecs-ec2/ecs-taskdef.template.json`).
 
-Backend Python services use **eight separate ECR repositories** created by `bootstrap.sh`: `linkedin-sim/auth_service`, `linkedin-sim/member_profile_service`, … (see `bootstrap.sh`). CI builds with `docker build --target <service> ./backend` and does **not** use a single `linkedin-sim/backend` repository anymore.
-
-### CI fails on “Verify Kafka viewer ECR repository exists”
-
-1. **Repository missing:** In **ECR → Create repository**, name **`linkedin-sim/kafka-topics-viewer`** (private). Or run **`bash infra/ecs-ec2/bootstrap.sh`** (creates all `linkedin-sim/*` repos). Then re-run the workflow.
-2. **`AccessDenied` on `DescribeRepositories`:** Re-run **`bootstrap.sh`** so **`githubActionsEcsDeployRole`** inline policy **`linkedinSimEcsDeploy`** picks up **`ecr:DescribeRepositories`** (CI does not call `CreateRepository`; repo creation is console or bootstrap).
+Backend Python services use **eight separate ECR repositories** created by `bootstrap.sh`: `linkedin-sim/auth_service`, `linkedin-sim/member_profile_service`, … (see `bootstrap.sh`). CI builds with `docker build --target <service> ./backend` and does **not** use a single `linkedin-sim/backend` repository anymore. **`linkedinSimEcsDeploy`** on **`githubActionsEcsDeployRole`** includes **`ecr:DescribeRepositories`** (from **`bootstrap.sh`**) so tooling and future checks can list ECR repos; re-run bootstrap after policy changes in this repo.
 
 ### If you already used the old single `linkedin-sim/backend` repo
 
