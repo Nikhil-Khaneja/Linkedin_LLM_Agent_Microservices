@@ -171,6 +171,8 @@ jobs:
             docker build --target "$target" -t "${REG}/linkedin-sim/${target}:${TAG}" ./backend
             docker push "${REG}/linkedin-sim/${target}:${TAG}"
           done
+          # REACT_APP_* ports must match ecs-taskdef.template.json hostPort per service and
+          # frontend/src/config/api.js fallbacks (8001–8008). Platform host ports come from render_taskdefs.HOST_PORTS.
           docker build \
             --build-arg "REACT_APP_AUTH_URL=http://${HOST}:8001" \
             --build-arg "REACT_APP_MEMBER_URL=http://${HOST}:8002" \
