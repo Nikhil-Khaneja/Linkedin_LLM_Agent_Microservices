@@ -156,6 +156,20 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Ensure Kafka viewer ECR repository exists
+        if: steps.pick.outputs.selection != ''
+        run: |
+          set -euo pipefail
+          _trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+          KV_REPO="$(_trim "${ECR_KAFKA_VIEWER_REPOSITORY:-}")"
+          KV_REPO="${KV_REPO:-linkedin-sim/kafka-topics-viewer}"
+          if aws ecr describe-repositories --repository-names "$KV_REPO" >/dev/null 2>&1; then
+            echo "ECR repository exists: $KV_REPO"
+          else
+            echo "Creating ECR repository: $KV_REPO"
+            aws ecr create-repository --repository-name "$KV_REPO" --image-scanning-configuration scanOnPush=true
+          fi
+
       - name: Build metadata
         if: steps.pick.outputs.selection != ''
         id: meta
