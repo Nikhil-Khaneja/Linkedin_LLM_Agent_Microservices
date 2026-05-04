@@ -4,15 +4,16 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 
-# Accept ALB URLs at build time for AWS deployments
-ARG REACT_APP_AUTH_URL=http://localhost:8001
-ARG REACT_APP_MEMBER_URL=http://localhost:8002
-ARG REACT_APP_RECRUITER_URL=http://localhost:8003
-ARG REACT_APP_JOB_URL=http://localhost:8004
-ARG REACT_APP_APP_URL=http://localhost:8005
-ARG REACT_APP_MSG_URL=http://localhost:8006
-ARG REACT_APP_ANALYTICS_URL=http://localhost:8007
-ARG REACT_APP_AI_URL=http://localhost:8008
+# Leave empty by default so frontend can auto-target the current host at runtime
+# (frontend/src/config/api.js will use window.location host + service ports).
+ARG REACT_APP_AUTH_URL=
+ARG REACT_APP_MEMBER_URL=
+ARG REACT_APP_RECRUITER_URL=
+ARG REACT_APP_JOB_URL=
+ARG REACT_APP_APP_URL=
+ARG REACT_APP_MSG_URL=
+ARG REACT_APP_ANALYTICS_URL=
+ARG REACT_APP_AI_URL=
 ENV REACT_APP_AUTH_URL=$REACT_APP_AUTH_URL
 ENV REACT_APP_MEMBER_URL=$REACT_APP_MEMBER_URL
 ENV REACT_APP_RECRUITER_URL=$REACT_APP_RECRUITER_URL
