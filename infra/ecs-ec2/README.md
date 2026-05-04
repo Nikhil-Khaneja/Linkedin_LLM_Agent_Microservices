@@ -52,7 +52,7 @@ Add these in **Settings → Secrets and variables → Actions → Variables**:
 | `AWS_REGION` | Same as bootstrap |
 | `AWS_ROLE_ARN` | `GITHUB_ACTIONS_ROLE_ARN` from bootstrap output |
 | `ECS_CLUSTER` | `linkedin-sim-ec2` |
-| `APP_HOST` | EC2 **public** IP (browser + MinIO public URLs) |
+| `APP_HOST` | **Canonical browser host** (domain or Elastic IP). Optional comma list, e.g. `thelastdegree.dev,34.199.109.255` — first entry is used for public URLs in task env; **all** entries are allowed CORS origins. |
 | `ECS_HOST_PRIVATE_IP` | EC2 **private** IP (printed as `ECS_HOST_PRIVATE_IP` from bootstrap) |
 | `ECR_FRONTEND_REPOSITORY` | `linkedin-sim/frontend` |
 | `ECR_MYSQL_REPOSITORY` | `linkedin-sim/mysql` |

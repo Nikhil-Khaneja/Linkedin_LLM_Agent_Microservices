@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from services.shared.resume_parser import extract_keywords
+
 COMMON_SKILLS = {
     'python', 'java', 'javascript', 'typescript', 'react', 'node', 'node.js', 'sql', 'mysql', 'mongodb', 'redis', 'kafka',
     'docker', 'kubernetes', 'aws', 'gcp', 'azure', 'spark', 'hadoop', 'airflow', 'tensorflow', 'pytorch', 'machine learning',
@@ -11,11 +13,6 @@ COMMON_SKILLS = {
     'rest', 'graphql', 'microservices', 'system design', 'elasticsearch', 'mlflow', 'bert', 'pandas', 'numpy', 'scikit-learn',
     'postgresql', 'oracle', 'firebase', 'supabase', 'terraform', 'ansible', 'jenkins', 'ci/cd', 'testing', 'pytest', 'selenium',
     'communication', 'leadership', 'product management', 'project management', 'salesforce', 'figma', 'ux', 'ui', 'superset'
-}
-STOPWORDS = {
-    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'will', 'role', 'team', 'your', 'you', 'our', 'are', 'job', 'work',
-    'about', 'have', 'has', 'into', 'who', 'years', 'year', 'plus', 'using', 'use', 'required', 'preferred', 'strong', 'ability',
-    'experience', 'skills', 'candidate', 'position', 'including', 'across', 'such', 'their', 'they', 'them', 'open', 'closed'
 }
 
 
@@ -63,21 +60,6 @@ def skills_from_value(value) -> list[str]:
             seen.add(norm)
             deduped.append(item.strip())
     return deduped
-
-
-def extract_keywords(text: str, limit: int = 12) -> list[str]:
-    tokens = re.findall(r'[A-Za-z][A-Za-z0-9+#./-]{2,}', (text or '').lower())
-    seen: set[str] = set()
-    out: list[str] = []
-    for token in tokens:
-        if token in STOPWORDS:
-            continue
-        if token not in seen:
-            seen.add(token)
-            out.append(token)
-        if len(out) >= limit:
-            break
-    return out
 
 
 def experience_years_from_entries(experience_entries) -> float:

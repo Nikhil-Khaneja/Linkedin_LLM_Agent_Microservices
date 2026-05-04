@@ -4,6 +4,29 @@ from io import BytesIO
 from typing import Any
 import re
 
+# Used by extract_keywords (and shared with ai matching); keep in sync with orchestrator heuristics.
+_STOPWORDS = frozenset({
+    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'will', 'role', 'team', 'your', 'you', 'our', 'are', 'job', 'work',
+    'about', 'have', 'has', 'into', 'who', 'years', 'year', 'plus', 'using', 'use', 'required', 'preferred', 'strong', 'ability',
+    'experience', 'skills', 'candidate', 'position', 'including', 'across', 'such', 'their', 'they', 'them', 'open', 'closed',
+})
+
+
+def extract_keywords(text: str, limit: int = 12) -> list[str]:
+    """Token-level keyword skim for resumes/jobs (no LLM). Safe for member_profile and shared code."""
+    tokens = re.findall(r'[A-Za-z][A-Za-z0-9+#./-]{2,}', (text or '').lower())
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in tokens:
+        if token in _STOPWORDS:
+            continue
+        if token not in seen:
+            seen.add(token)
+            out.append(token)
+        if len(out) >= limit:
+            break
+    return out
+
 
 def _normalize_text(text: str) -> str:
     text = text.replace('\x00', ' ')
