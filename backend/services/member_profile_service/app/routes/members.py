@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ from services.shared.notifications import create_notification
 from services.shared.resume_parser import extract_text_from_bytes
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(os.environ.get("APP_DATA_DIR", "/app/data")) / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -50,7 +52,8 @@ def _notifications():
 
 def _actor(authorization: str | None):
     claims = require_auth(authorization)
-    actor_id = claims.get("sub") or claims.get("user_id")
+    raw_id = claims.get("sub") or claims.get("user_id")
+    actor_id = str(raw_id) if raw_id is not None else ""
     role = claims.get("role") or claims.get("subject_type")
     email = claims.get("email")
     return {"actor_id": actor_id, "role": role, "email": email}
@@ -68,6 +71,11 @@ def _safe_list(value):
 
 
 def _json_list(value):
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = value.decode("utf-8", errors="replace")
+        except Exception:
+            return []
     if isinstance(value, list):
         return value
     if isinstance(value, str) and value:
@@ -462,46 +470,65 @@ async def search_members(payload: dict = Body(...), authorization: str | None = 
         page = 1
     page = max(1, page)
     offset = (page - 1) * limit
+    self_id = actor["actor_id"]
 
-    if keyword:
-        like = f"%{keyword}%"
-        rows = fetch_all(
-            """
-            SELECT * FROM members
-            WHERE is_deleted = 0
-              AND member_id LIKE 'mem_%'
-              AND member_id <> :self_id
-              AND (
-                lower(first_name) LIKE :like OR
-                lower(last_name) LIKE :like OR
-                lower(email) LIKE :like OR
-                lower(headline) LIKE :like OR
-                lower(about_text) LIKE :like OR
-                lower(location_text) LIKE :like OR
-                lower(COALESCE(current_company, '')) LIKE :like OR
-                lower(COALESCE(current_title, '')) LIKE :like OR
-                lower(COALESCE(payload_json, '')) LIKE :like
-              )
-            ORDER BY first_name ASC, last_name ASC
-            LIMIT :limit OFFSET :offset
-            """,
-            {"self_id": actor["actor_id"], "like": like, "limit": limit, "offset": offset},
+    try:
+        if keyword:
+            like = f"%{keyword}%"
+            rows = fetch_all(
+                """
+                SELECT * FROM members
+                WHERE is_deleted = 0
+                  AND member_id LIKE 'mem_%'
+                  AND member_id <> :self_id
+                  AND (
+                    lower(first_name) LIKE :like OR
+                    lower(last_name) LIKE :like OR
+                    lower(email) LIKE :like OR
+                    lower(headline) LIKE :like OR
+                    lower(about_text) LIKE :like OR
+                    lower(location_text) LIKE :like OR
+                    lower(COALESCE(current_company, '')) LIKE :like OR
+                    lower(COALESCE(current_title, '')) LIKE :like OR
+                    lower(COALESCE(payload_json, '')) LIKE :like
+                  )
+                ORDER BY first_name ASC, last_name ASC
+                LIMIT :limit OFFSET :offset
+                """,
+                {"self_id": self_id, "like": like, "limit": limit, "offset": offset},
+            )
+        else:
+            rows = fetch_all(
+                """
+                SELECT * FROM members
+                WHERE is_deleted = 0
+                  AND member_id LIKE 'mem_%'
+                  AND member_id <> :self_id
+                ORDER BY first_name ASC, last_name ASC
+                LIMIT :limit OFFSET :offset
+                """,
+                {"self_id": self_id, "limit": limit, "offset": offset},
+            )
+    except Exception:
+        logger.exception("members.search query failed self_id=%s keyword=%r", self_id, keyword)
+        return fail(
+            "search_failed",
+            "Member search could not be completed. Check database connectivity and schema.",
+            trc,
+            status_code=500,
         )
-    else:
-        rows = fetch_all(
-            """
-            SELECT * FROM members
-            WHERE is_deleted = 0
-              AND member_id LIKE 'mem_%'
-              AND member_id <> :self_id
-            ORDER BY first_name ASC, last_name ASC
-            LIMIT :limit OFFSET :offset
-            """,
-            {"self_id": actor["actor_id"], "limit": limit, "offset": offset},
-        )
+
+    items: list = []
+    for r in rows:
+        try:
+            shaped = _member_to_profile(r, media_base)
+            if shaped:
+                items.append(shaped)
+        except Exception:
+            logger.exception("members.search skipped row member_id=%r", (r or {}).get("member_id"))
 
     return success(
-        {"items": [_member_to_profile(r, media_base) for r in rows]},
+        {"items": items},
         trc,
         {"page": page, "page_size": limit, "offset": offset},
     )

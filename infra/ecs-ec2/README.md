@@ -1,6 +1,6 @@
 # ECS on EC2 (bridge networking) + GitHub Actions
 
-Deploy the LinkedIn-sim stack on **EC2** (not Fargate) using **multiple ECS services** so each app can roll **independently**. Each Python service has its **own ECR image** (multi-stage `backend/Dockerfile` targets) so CI can rebuild and redeploy only the services you select. Each task uses **bridge** networking on the shared container instance; the **platform** task publishes MySQL, MongoDB, Redis, Kafka, and MinIO on **host ports**, and app tasks talk to them via the instance **private IP** (`ECS_HOST_PRIVATE_IP`). Infrastructure is created with **AWS CLI** only (no Terraform).
+Deploy the LinkedIn-sim stack on **EC2** (not Fargate) using **multiple ECS services** so each app can roll **independently**. Each Python service has its **own ECR image** (multi-stage `backend/Dockerfile` targets) so CI can rebuild and redeploy only the services you select. Each task uses **bridge** networking on the shared container instance; the **platform** task publishes MySQL, MongoDB, Redis, Kafka, MinIO, and the **Kafka topics viewer** (read-only UI) on **host ports**, and app tasks talk to them via the instance **private IP** (`ECS_HOST_PRIVATE_IP`). Infrastructure is created with **AWS CLI** only (no Terraform).
 
 ## Overview
 
@@ -57,7 +57,12 @@ Add these in **Settings → Secrets and variables → Actions → Variables**:
 | `ECR_FRONTEND_REPOSITORY` | `linkedin-sim/frontend` |
 | `ECR_MYSQL_REPOSITORY` | `linkedin-sim/mysql` |
 | `ECR_MONGO_REPOSITORY` | `linkedin-sim/mongo` |
+| `ECR_KAFKA_VIEWER_REPOSITORY` | Optional. Defaults in CI to `linkedin-sim/kafka-topics-viewer` if unset. ECR repo is created by `bootstrap.sh`. |
 | `PUBLIC_HTTP_SCHEME` | Optional. Affects **`PUBLIC_BASE_URL`** in rendered task defs (and related “canonical” links). **APIs and media on `:8001`–`:8008` stay `http://`** until you put TLS in front of those ports or route them behind **443**. Defaults to `http`. |
+
+### Kafka topics viewer on the EC2 host
+
+After the **platform** task is running, the viewer is bound to **host port `3840`** (same as local Compose). Open **`http://<ECS-host-public-IP-or-domain>:3840`** (HTTP only unless you add a TLS listener for that port). Allow **inbound TCP 3840** on the instance security group (`linkedin-sim-ecs-sg` from bootstrap) from your IP or VPN. Redeploy the platform task after this change (**workflow_dispatch** → **Redeploy data plane**, or push under `kafka_topics_viewer/**` / `infra/ecs-ec2/ecs-taskdef.template.json`).
 
 Backend Python services use **eight separate ECR repositories** created by `bootstrap.sh`: `linkedin-sim/auth_service`, `linkedin-sim/member_profile_service`, … (see `bootstrap.sh`). CI builds with `docker build --target <service> ./backend` and does **not** use a single `linkedin-sim/backend` repository anymore.
 
@@ -72,7 +77,7 @@ Backend Python services use **eight separate ECR repositories** created by `boot
 Browsers **block mixed content**: if the UI loads over **HTTPS**, API calls must use **HTTPS** too (not `http://…:8001`).
 
 1. **Terminate TLS** in front of the EC2 instance, e.g. **Application Load Balancer + ACM certificate**, **Cloudflare**, or **Caddy/nginx + Let’s Encrypt** on the host. You must expose **TLS on the same hostnames/ports** the React app calls (today that is **port 80** for the UI and **8001–8008** for APIs), or put a **reverse proxy** on **443** that routes to those ports and then point the app at **HTTPS URLs** only.
-2. In GitHub Actions **Variables**, set **`PUBLIC_HTTP_SCHEME`** to **`https`** and keep **`APP_HOST`** as your public hostname (comma-list domain + IP if needed). Redeploy so `render_taskdefs.py` updates **`PUBLIC_BASE_URL`** and CORS. **`MEMBER_PUBLIC_URL`** and the default frontend `api.js` bases for **`:8001`–`:8008`** remain **`http://`** until each port (or a single **443** proxy path) actually serves TLS—otherwise resume/media links hit **`ERR_SSL_PROTOCOL_ERROR`**.
+2. In GitHub Actions **Variables**, set **`PUBLIC_HTTP_SCHEME`** to **`https`** and set **`APP_HOST`** with the **browser hostname first** (e.g. `linkedin.example.com`, optionally comma-separated with the Elastic IP). Redeploy so `render_taskdefs.py` updates **`PUBLIC_BASE_URL`**, CORS, and **`MEMBER_PUBLIC_URL`** to **`https://{first-host}`** (no `:8002`) so signed **`/members/media`** links match the ALB. Bake **`REACT_APP_*_URL`** as full **`https://…`** origins for APIs (same host, path-routed on 443); do not point the SPA at raw **`http://…:8001`** from an **HTTPS** page.
 3. Open the site only over **`https://`** once step 1 is working end-to-end.
 
 Until TLS works on those endpoints, use **`http://`** for both the domain and APIs, or the browser will block requests.

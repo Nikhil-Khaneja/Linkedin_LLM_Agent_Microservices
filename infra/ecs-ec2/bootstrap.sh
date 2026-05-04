@@ -194,7 +194,8 @@ for r in \
   linkedin-sim/ai_orchestrator_service \
   linkedin-sim/frontend \
   linkedin-sim/mysql \
-  linkedin-sim/mongo; do
+  linkedin-sim/mongo \
+  linkedin-sim/kafka-topics-viewer; do
   create_ecr_repo_if_missing "$r"
 done
 
@@ -368,6 +369,7 @@ echo "Per-service backend ECR repos: ${ECR_BASE}/linkedin-sim/<auth_service|memb
 echo "ECR_FRONTEND_REPO=${ECR_BASE}/linkedin-sim/frontend"
 echo "ECR_MYSQL_REPO=${ECR_BASE}/linkedin-sim/mysql"
 echo "ECR_MONGO_REPO=${ECR_BASE}/linkedin-sim/mongo"
+echo "ECR_KAFKA_VIEWER_REPO=${ECR_BASE}/linkedin-sim/kafka-topics-viewer"
 echo "GITHUB_ACTIONS_ROLE_ARN=$GITHUB_ACTIONS_ROLE_ARN"
 echo ""
 echo "Set these GitHub Actions repository variables:"
@@ -379,6 +381,7 @@ echo "ECS_HOST_PRIVATE_IP=$ECS_HOST_PRIVATE_IP"
 echo "ECR_FRONTEND_REPOSITORY=linkedin-sim/frontend"
 echo "ECR_MYSQL_REPOSITORY=linkedin-sim/mysql"
 echo "ECR_MONGO_REPOSITORY=linkedin-sim/mongo"
+echo "ECR_KAFKA_VIEWER_REPOSITORY=linkedin-sim/kafka-topics-viewer"
 echo ""
 echo "OpenRouter (AI orchestrator on ECS): add a GitHub Actions *repository secret* (not a variable):"
 echo "  GitHub → Settings → Secrets and variables → Actions → New repository secret"

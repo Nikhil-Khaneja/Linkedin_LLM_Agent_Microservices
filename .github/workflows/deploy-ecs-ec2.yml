@@ -35,6 +35,7 @@ jobs:
             echo "ECR_FRONTEND_REPOSITORY=$(_trim "${{ vars.ECR_FRONTEND_REPOSITORY }}")"
             echo "ECR_MYSQL_REPOSITORY=$(_trim "${{ vars.ECR_MYSQL_REPOSITORY }}")"
             echo "ECR_MONGO_REPOSITORY=$(_trim "${{ vars.ECR_MONGO_REPOSITORY }}")"
+            echo "ECR_KAFKA_VIEWER_REPOSITORY=$(_trim "${{ vars.ECR_KAFKA_VIEWER_REPOSITORY }}")"
             echo "REACT_APP_API_BASE=$(_trim "${{ vars.REACT_APP_API_BASE }}")"
             echo "REACT_APP_AUTH_URL=$(_trim "${{ vars.REACT_APP_AUTH_URL }}")"
             echo "REACT_APP_MEMBER_URL=$(_trim "${{ vars.REACT_APP_MEMBER_URL }}")"
@@ -72,6 +73,7 @@ jobs:
               - 'infra/mongo/**'
               - 'infra/ecs-ec2/Dockerfile.mysql'
               - 'infra/ecs-ec2/Dockerfile.mongo'
+              - 'kafka_topics_viewer/**'
             backend_shared:
               - 'backend/requirements.txt'
               - 'backend/Dockerfile'
@@ -166,6 +168,8 @@ jobs:
           echo "frontend=${REG}/${ECR_FRONTEND_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "mysql=${REG}/${ECR_MYSQL_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "mongo=${REG}/${ECR_MONGO_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          KV_REPO="${ECR_KAFKA_VIEWER_REPOSITORY:-linkedin-sim/kafka-topics-viewer}"
+          echo "kafka_viewer=${REG}/${KV_REPO}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push images
         if: steps.pick.outputs.selection != ''
@@ -177,6 +181,7 @@ jobs:
           FRONT="${ECR_FRONTEND_REPOSITORY}"
           MYSQLR="${ECR_MYSQL_REPOSITORY}"
           MONGOR="${ECR_MONGO_REPOSITORY}"
+          KV_REPO="${ECR_KAFKA_VIEWER_REPOSITORY:-linkedin-sim/kafka-topics-viewer}"
           API_BASE="${REACT_APP_API_BASE:-}"
           AUTH_URL="${REACT_APP_AUTH_URL:-$API_BASE}"
           MEMBER_URL="${REACT_APP_MEMBER_URL:-$API_BASE}"
@@ -205,10 +210,13 @@ jobs:
           docker push "${{ steps.meta.outputs.mysql }}"
           docker build -f infra/ecs-ec2/Dockerfile.mongo -t "${{ steps.meta.outputs.mongo }}" .
           docker push "${{ steps.meta.outputs.mongo }}"
+          docker build -t "${{ steps.meta.outputs.kafka_viewer }}" ./kafka_topics_viewer
+          docker push "${{ steps.meta.outputs.kafka_viewer }}"
           {
             echo "FRONTEND_IMAGE=${REG}/${FRONT}:${TAG}"
             echo "MYSQL_IMAGE=${REG}/${MYSQLR}:${TAG}"
             echo "MONGO_IMAGE=${REG}/${MONGOR}:${TAG}"
+            echo "KAFKA_VIEWER_IMAGE=${REG}/${KV_REPO}:${TAG}"
             echo "BACKEND_IMAGE_AUTH_SERVICE=${REG}/linkedin-sim/auth_service:${TAG}"
             echo "BACKEND_IMAGE_RECRUITER_COMPANY_SERVICE=${REG}/linkedin-sim/recruiter_company_service:${TAG}"
             echo "BACKEND_IMAGE_MEMBER_PROFILE_SERVICE=${REG}/linkedin-sim/member_profile_service:${TAG}"
