@@ -68,6 +68,7 @@ export default function DashboardPage() {
 
   const displayName = profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
   const initial = ((displayName || user?.email || 'U')[0]).toUpperCase();
+  const photo = localStorage.getItem(`photo_${currentId}`);
 
   return (
     <div>
@@ -76,7 +77,11 @@ export default function DashboardPage() {
           <div style={S.card}>
             <div style={S.banner} />
             <div style={{ padding: '0 16px 16px', textAlign: 'center', marginTop: -34 }}>
-              <div style={S.bigAvatar}>{initial}</div>
+              <div style={S.bigAvatar}>
+                {photo
+                  ? <img src={photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                  : initial}
+              </div>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 8, marginBottom: 2 }}>{displayName || user?.email?.split('@')[0] || 'Your profile'}</h3>
               <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', marginBottom: 12 }}>{profile?.headline || 'Add a headline'}</p>
               <Link to="/profile" style={S.viewProfile}>View full profile</Link>

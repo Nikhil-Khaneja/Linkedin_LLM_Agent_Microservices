@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import BASE from '../config/api';
 import toast from 'react-hot-toast';
@@ -16,6 +16,7 @@ export default function JobsPage() {
   const [savedJobIds, setSavedJobIds] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [hideApplied, setHideApplied] = useState(true);
+  const [aiModal, setAiModal] = useState(null);
   const [filters, setFilters] = useState({ keyword: searchParams.get('q') || '', location: '', work_mode: '', employment_type: '', salary_min: '', salary_max: '' });
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -61,6 +62,23 @@ export default function JobsPage() {
       }
     } catch {
       setSavedJobIds(new Set());
+    }
+  };
+
+  const openAIScore = async (job) => {
+    if (!token) return toast.error('Sign in to see your match score');
+    setAiModal({ job_id: job.job_id, title: job.title, loading: true, result: null, error: null });
+    try {
+      const { data } = await axios.post(
+        `${BASE.ai}/ai/coach/suggest`,
+        { target_job_id: job.job_id },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setAiModal((prev) => prev?.job_id === job.job_id ? { ...prev, loading: false, result: data?.data || null } : prev);
+      // Bust the Coach page session cache so fresh history loads on navigate
+      sessionStorage.removeItem('coach_history_v1');
+    } catch (err) {
+      setAiModal((prev) => prev?.job_id === job.job_id ? { ...prev, loading: false, error: err?.response?.data?.error?.message || 'Failed to load score' } : prev);
     }
   };
 
@@ -210,14 +228,80 @@ export default function JobsPage() {
             )}
           </div>
         ) : (
-          jobs.map((job) => <JobCard key={job.job_id} job={{ ...job, is_saved: savedJobIds.has(job.job_id) || job.is_saved }} isApplied={appliedJobIds.has(job.job_id)} />)
+          jobs.map((job) => <JobCard key={job.job_id} job={{ ...job, is_saved: savedJobIds.has(job.job_id) || job.is_saved }} isApplied={appliedJobIds.has(job.job_id)} userType={user?.userType} onAIScore={openAIScore} />)
+        )}
+      </div>
+      {aiModal && <AIScoreModal modal={aiModal} onClose={() => setAiModal(null)} />}
+    </div>
+  );
+}
+
+function AIScoreModal({ modal, onClose }) {
+  const navigate = useNavigate();
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 12, padding: '24px 28px', maxWidth: 440, width: '92%', boxShadow: '0 8px 40px rgba(0,0,0,0.22)' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+          <div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 2 }}>AI Match Score</h3>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.5)' }}>{modal.title}</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: '#999', lineHeight: 1, padding: 0 }}>✕</button>
+        </div>
+
+        {modal.loading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+            <div style={{ width: 32, height: 32, border: '3px solid #e5e7eb', borderTopColor: '#7c3aed', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
+            <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }}>Analyzing your profile…</p>
+          </div>
+        ) : modal.result ? (
+          <>
+            <div style={{ display: 'flex', gap: 28, marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Current match</p>
+                <p style={{ fontSize: 46, fontWeight: 800, color: '#0a66c2', lineHeight: 1 }}>{modal.result.current_match_score}</p>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>If improved</p>
+                <p style={{ fontSize: 46, fontWeight: 800, color: '#057642', lineHeight: 1 }}>{modal.result.match_score_if_improved}</p>
+              </div>
+              {modal.result.score_delta > 0 && (
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Potential gain</p>
+                  <p style={{ fontSize: 46, fontWeight: 800, color: '#057642', lineHeight: 1 }}>+{modal.result.score_delta}</p>
+                </div>
+              )}
+            </div>
+
+            {modal.result.skills_to_add?.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'rgba(0,0,0,0.75)' }}>Skills to add</p>
+                {modal.result.skills_to_add.map((s) => (
+                  <span key={s} style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 999, background: '#fff7ed', color: '#b45309', fontSize: 12, fontWeight: 600, marginRight: 6, marginBottom: 6, border: '1px solid #fed7aa' }}>{s}</span>
+                ))}
+              </div>
+            )}
+
+            {modal.result.resume_tips?.[0] && (
+              <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.7)', background: '#f8f9fa', borderRadius: 6, padding: '10px 12px', marginBottom: 20, lineHeight: 1.5 }}>
+                💡 {modal.result.resume_tips[0]}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={onClose} style={{ padding: '8px 18px', border: '1.5px solid rgba(0,0,0,0.2)', borderRadius: 20, background: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' }}>Close</button>
+              <button onClick={() => { onClose(); navigate('/coach'); }} style={{ padding: '8px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 20, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: 'inherit' }}>Full Analysis →</button>
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#cc1016', fontSize: 14, textAlign: 'center', padding: '24px 0' }}>{modal.error || 'Failed to load score. Make sure your profile is set up.'}</p>
         )}
       </div>
     </div>
   );
 }
 
-function JobCard({ job, isApplied }) {
+function JobCard({ job, isApplied, onAIScore, userType }) {
   return (
     <Link to={`/jobs/${job.job_id}`} state={{ job }} style={{ textDecoration: 'none', display: 'block', marginBottom: 8 }}>
       <div className="li-card" style={S.jobCard}>
@@ -239,6 +323,14 @@ function JobCard({ job, isApplied }) {
               <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.45)', margin: 0 }}>{job.is_saved ? 'Saved job' : 'Open role'}</p>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {job.is_saved && <span style={{ fontSize: 13, color: '#0a66c2', fontWeight: 600, border: '1px solid #0a66c2', borderRadius: 12, padding: '2px 10px', background: '#eef5fc' }}>Saved</span>}
+                {userType === 'member' && (
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAIScore(job); }}
+                    style={{ fontSize: 12, color: '#7c3aed', fontWeight: 600, border: '1px solid #7c3aed', borderRadius: 12, padding: '2px 10px', background: '#f5f3ff', cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    ✨ AI Score
+                  </button>
+                )}
                 {isApplied ? <span style={{ fontSize: 13, color: '#057642', fontWeight: 600, border: '1px solid #057642', borderRadius: 12, padding: '2px 10px' }}>✓ Applied</span> : <span style={{ fontSize: 13, color: '#0a66c2', fontWeight: 600, border: '1px solid #0a66c2', borderRadius: 12, padding: '2px 10px', background: '#fff' }}>Apply</span>}
               </div>
             </div>

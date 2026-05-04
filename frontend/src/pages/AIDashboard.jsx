@@ -52,6 +52,8 @@ export default function AIDashboard() {
   const [approvalStats, setApprovalStats] = useState(null);
   const [matchQuality, setMatchQuality] = useState(null);
   const [draftEdits, setDraftEdits] = useState({});
+  const [redraftInstructions, setRedraftInstructions] = useState({});
+  const [redraftLoading, setRedraftLoading] = useState({});
   const wsRef = useRef(null);
   const navigate = useNavigate();
   const activeTaskRef = useRef(null);
@@ -279,6 +281,28 @@ export default function AIDashboard() {
     }
   };
 
+  const redraftDraft = async (taskId, candidateId) => {
+    const instructions = (redraftInstructions[candidateId] || '').trim();
+    if (!instructions) return toast.error('Type your revision instructions first');
+    setRedraftLoading((prev) => ({ ...prev, [candidateId]: true }));
+    try {
+      const { data } = await axios.post(
+        `${BASE.ai}/ai/tasks/${taskId}/redraft`,
+        { candidate_id: candidateId, instructions, current_draft: draftEdits[candidateId] || '' },
+        authCfg,
+      );
+      const newMsg = data?.data?.message;
+      if (newMsg) {
+        setDraftEdits((prev) => ({ ...prev, [candidateId]: newMsg }));
+        toast.success('Draft updated');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Redraft failed');
+    } finally {
+      setRedraftLoading((prev) => ({ ...prev, [candidateId]: false }));
+    }
+  };
+
   const sendOutreach = async (taskId) => {
     try {
       setSendingOutreach(true);
@@ -489,23 +513,52 @@ export default function AIDashboard() {
             <section>
               <h3 style={S.sectionTitle}>Outreach drafts (editable — one per candidate)</h3>
               <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', marginBottom: 10 }}>
-                Edit any draft below before approving. If you change <strong>any</strong> of them, this approval is recorded as <strong>edited</strong>; if you leave them all as-is, it's recorded as <strong>approved_as_is</strong>.
+                Edit any draft manually or type revision instructions and click <strong>↺ Redraft</strong> to let AI rewrite it. Edited drafts are recorded as <strong>edited</strong> on approval.
               </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {outreachDrafts.map((draft) => {
                   const cid = draft.candidate_id;
                   if (!cid) return null;
+                  const isRedrafting = !!redraftLoading[cid];
                   return (
-                    <div key={cid} style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 6, padding: 10 }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
-                        {draft.name || cid}
-                      </p>
-                      <textarea
-                        value={draftEdits[cid] ?? (draft.message || draft.draft || '')}
-                        onChange={(e) => setDraftEdits({ ...draftEdits, [cid]: e.target.value })}
-                        rows={5}
-                        style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid rgba(0,0,0,0.15)', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.5 }}
-                      />
+                    <div key={cid} style={{ border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8, overflow: 'hidden' }}>
+                      {/* Header */}
+                      <div style={{ padding: '10px 14px', background: '#f8f9fa', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, color: 'rgba(0,0,0,0.85)' }}>{draft.name || cid}</p>
+                      </div>
+                      {/* Draft textarea */}
+                      <div style={{ padding: '12px 14px', background: '#fff' }}>
+                        <textarea
+                          value={draftEdits[cid] ?? (draft.message || draft.draft || '')}
+                          onChange={(e) => setDraftEdits({ ...draftEdits, [cid]: e.target.value })}
+                          rows={6}
+                          style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid rgba(0,0,0,0.15)', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.6, resize: 'vertical', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      {/* Redraft chatbox */}
+                      <div style={{ padding: '10px 14px 14px', background: '#f8f9fa', borderTop: '1px solid rgba(0,0,0,0.06)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'rgba(0,0,0,0.5)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 5 }}>
+                            Revision instructions
+                          </label>
+                          <input
+                            type="text"
+                            placeholder='e.g. "Make it shorter and more casual" or "Focus on their Python experience"'
+                            value={redraftInstructions[cid] || ''}
+                            onChange={(e) => setRedraftInstructions((prev) => ({ ...prev, [cid]: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') redraftDraft(activeTask.task_id, cid); }}
+                            disabled={isRedrafting}
+                            style={{ width: '100%', padding: '9px 12px', border: '1.5px solid rgba(0,0,0,0.15)', borderRadius: 6, fontFamily: 'inherit', fontSize: 13, background: '#fff', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                        <button
+                          onClick={() => redraftDraft(activeTask.task_id, cid)}
+                          disabled={isRedrafting || !redraftInstructions[cid]?.trim()}
+                          style={{ marginTop: 20, padding: '9px 18px', background: isRedrafting ? '#e5e7eb' : '#7c3aed', color: isRedrafting ? '#999' : '#fff', border: 'none', borderRadius: 999, fontWeight: 700, cursor: isRedrafting || !redraftInstructions[cid]?.trim() ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 13, whiteSpace: 'nowrap', opacity: !redraftInstructions[cid]?.trim() && !isRedrafting ? 0.5 : 1 }}
+                        >
+                          {isRedrafting ? '⟳ Redrafting…' : '↺ Redraft'}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
