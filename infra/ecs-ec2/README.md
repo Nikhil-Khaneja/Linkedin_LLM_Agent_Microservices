@@ -57,7 +57,7 @@ Add these in **Settings → Secrets and variables → Actions → Variables**:
 | `ECR_FRONTEND_REPOSITORY` | `linkedin-sim/frontend` |
 | `ECR_MYSQL_REPOSITORY` | `linkedin-sim/mysql` |
 | `ECR_MONGO_REPOSITORY` | `linkedin-sim/mongo` |
-| `PUBLIC_HTTP_SCHEME` | Optional. Set to `https` after you terminate TLS (see **HTTPS** below). Defaults to `http`. Must match what the browser uses so `REACT_APP_*` and CORS stay aligned. |
+| `PUBLIC_HTTP_SCHEME` | Optional. Affects **`PUBLIC_BASE_URL`** in rendered task defs (and related “canonical” links). **APIs and media on `:8001`–`:8008` stay `http://`** until you put TLS in front of those ports or route them behind **443**. Defaults to `http`. |
 
 Backend Python services use **eight separate ECR repositories** created by `bootstrap.sh`: `linkedin-sim/auth_service`, `linkedin-sim/member_profile_service`, … (see `bootstrap.sh`). CI builds with `docker build --target <service> ./backend` and does **not** use a single `linkedin-sim/backend` repository anymore.
 
@@ -72,7 +72,7 @@ Backend Python services use **eight separate ECR repositories** created by `boot
 Browsers **block mixed content**: if the UI loads over **HTTPS**, API calls must use **HTTPS** too (not `http://…:8001`).
 
 1. **Terminate TLS** in front of the EC2 instance, e.g. **Application Load Balancer + ACM certificate**, **Cloudflare**, or **Caddy/nginx + Let’s Encrypt** on the host. You must expose **TLS on the same hostnames/ports** the React app calls (today that is **port 80** for the UI and **8001–8008** for APIs), or put a **reverse proxy** on **443** that routes to those ports and then point the app at **HTTPS URLs** only.
-2. In GitHub Actions **Variables**, set **`PUBLIC_HTTP_SCHEME`** to **`https`** and keep **`APP_HOST`** as your public hostname (comma-list domain + IP if needed). Redeploy so CI bakes **`https://…:8001`** into the frontend and `render_taskdefs.py` updates **`PUBLIC_BASE_URL` / `MEMBER_PUBLIC_URL`** and CORS.
+2. In GitHub Actions **Variables**, set **`PUBLIC_HTTP_SCHEME`** to **`https`** and keep **`APP_HOST`** as your public hostname (comma-list domain + IP if needed). Redeploy so `render_taskdefs.py` updates **`PUBLIC_BASE_URL`** and CORS. **`MEMBER_PUBLIC_URL`** and the default frontend `api.js` bases for **`:8001`–`:8008`** remain **`http://`** until each port (or a single **443** proxy path) actually serves TLS—otherwise resume/media links hit **`ERR_SSL_PROTOCOL_ERROR`**.
 3. Open the site only over **`https://`** once step 1 is working end-to-end.
 
 Until TLS works on those endpoints, use **`http://`** for both the domain and APIs, or the browser will block requests.

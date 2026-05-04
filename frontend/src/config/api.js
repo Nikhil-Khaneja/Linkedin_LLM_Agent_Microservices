@@ -16,13 +16,14 @@ function serviceBase(envUrl, port) {
     return envUrl || `http://localhost:${port}`;
   }
   // Production: use full URL from build (e.g. https://auth.example.com) when CI set REACT_APP_*.
-  // Otherwise same host + port as the page (https page => https://host:port — needs TLS on that port or a proxy).
   const baked = (envUrl || '').trim();
   if (/^https?:\/\//i.test(baked)) {
     return baked.replace(/\/$/, '');
   }
-  const proto = window.location.protocol || 'http:';
-  return `${proto}//${h}:${port}`;
+  // ECS bridge / published host ports: services speak plain HTTP on 8001–8008. Using the page's
+  // https:// here causes ERR_SSL_PROTOCOL_ERROR (nothing terminates TLS on each API port).
+  // Put TLS in front (ALB/nginx on 443) and bake full https REACT_APP_* URLs if you need HTTPS APIs.
+  return `http://${h}:${port}`;
 }
 
 const BASE = {
