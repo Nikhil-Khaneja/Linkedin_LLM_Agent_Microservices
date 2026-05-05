@@ -669,6 +669,20 @@ python3 -m compileall backend
 python3 -m pytest tests/api -q -p no:deepeval
 ```
 
+Current test inventory:
+- `44` pytest test cases under `tests/` (API + Kafka-focused tests).
+- Includes cross-service suites such as:
+  - `tests/api/test_end_to_end.py`
+  - `tests/api/test_ai_analytics.py`
+  - `tests/api/test_career_coach.py`
+  - `tests/api/test_service_coverage_matrix.py` (health + core flow coverage for all 8 services)
+
+Run only the service coverage matrix:
+
+```bash
+python3 -m pytest tests/api/test_service_coverage_matrix.py -q
+```
+
 ---
 
 ## Project Structure
