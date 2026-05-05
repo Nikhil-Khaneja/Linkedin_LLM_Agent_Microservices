@@ -6,16 +6,14 @@ Full-stack LinkedIn clone built as a distributed systems course project. Eight F
 
 ## Team
 
-| Name |
-|------|
-| Dhruv |
-| Nikhil |
-| Sanjay |
-| Viraat |
-| Shreya |
-| Drashti |
-| Charvee |
-| Shriram |
+- Dhruv
+- Nikhil
+- Sanjay
+- Viraat
+- Shreya
+- Drashti
+- Charvee
+- Shriram
 
 ---
 
