@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import BASE from '../config/api';
 import { normalizeMemberMediaUrl } from '../utils/memberMediaUrl';
 
-const HomeIcon  = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M23 9v2h-2v7a3 3 0 01-3 3h-4v-6h-4v6H6a3 3 0 01-3-3v-7H1V9l11-7z"/></svg>;
 const JobIcon   = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M17 6V5a3 3 0 00-3-3h-4a3 3 0 00-3 3v1H2v4a3 3 0 003 3h14a3 3 0 003-3V6h-5zm-8-1a1 1 0 011-1h4a1 1 0 011 1v1H9V5zm-2 9v6h2v-5h6v5h2v-6H7z"/></svg>;
 const MsgIcon   = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M16 4H8a5 5 0 00-5 5v4a5 5 0 005 5h.5l3.5 3 3.5-3H16a5 5 0 005-5V9a5 5 0 00-5-5z"/></svg>;
 const BriefIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M20 7h-4V5l-2-2h-4L8 5v2H4c-1.1 0-2 .9-2 2v5c0 .75.4 1.43 1 1.8V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-3.2c.6-.37 1-1.05 1-1.8V9c0-1.1-.9-2-2-2zm-8-1h4v1h-4V6zm5 14H7v-3h10v3zm2-5H5V9h14v6z"/></svg>;
@@ -127,7 +126,6 @@ export default function Layout() {
   };
 
   const memberNav = [
-    { to:'/',            label:'Home',      icon:<HomeIcon /> },
     { to:'/jobs',        label:'Jobs',      icon:<JobIcon /> },
     { to:'/applications',label:'My Jobs',   icon:<BriefIcon /> },
     { to:'/coach',       label:'Coach',     icon:<AIIcon /> },
@@ -136,7 +134,6 @@ export default function Layout() {
     { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
   ];
   const recruiterNav = [
-    { to:'/ai',        label:'Home',      icon:<HomeIcon /> },
     { to:'/recruiter', label:'Manage',    icon:<BriefIcon /> },
     { to:'/ai',        label:'AI Copilot',icon:<AIIcon /> },
     { to:'/analytics',   label:'Analytics', icon:<ChartIcon /> },
