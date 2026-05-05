@@ -354,9 +354,9 @@ Why Redis exists in this architecture:
 
 ### Key Features
 - **Kafka-first submit** — application submit is fully async; HTTP 202 returned immediately
-- **Salary filter** — `salary_min` / `salary_max` columns + search filter (Person 3)
-- **FULLTEXT search** — MySQL FULLTEXT index on `jobs(title, location_text)` (Person 3)
-- **AI Career Coach** — `POST /ai/coach/suggest` scores profile vs job and suggests improvements (Person 2)
+- **Salary filter** — `salary_min` / `salary_max` columns + search filter
+- **FULLTEXT search** — MySQL FULLTEXT index on `jobs(title, location_text)`
+- **AI Career Coach** — `POST /ai/coach/suggest` scores profile vs job and suggests improvements
 - **Application funnel** — Viewed -> Saved -> Started -> Submitted per job (dropdown selector)
 - **Geo chart** — city-wise applications per job (dropdown selector)
 - **Recruiter-scoped analytics** — hiring charts limited to the recruiter's posted jobs
@@ -634,7 +634,7 @@ bash infra/ecs-ec2/destroy.sh --delete-ecr
 
 ---
 
-## Performance Benchmarks (Person 4)
+## Performance Benchmarks
 
 ```bash
 python3 scripts/run_performance_benchmarks.py --all
