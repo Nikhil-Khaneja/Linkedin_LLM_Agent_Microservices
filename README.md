@@ -70,100 +70,195 @@ flowchart LR
 **Kafka-first example path:**
 `POST /applications/submit` -> emit `application.submit.requested` -> async consumer persists application -> emit `application.submitted` -> analytics rollups update -> UI reads from query APIs.
 
-## Service Catalog (Brief + Diagram)
+## Service Catalog (Detailed)
 
 ### `auth_service` (`:8001`)
-- Registers users, issues RS256 JWT access/refresh tokens, rotates refresh tokens.
-- Authoritative source for identity (`users`, `refresh_tokens`).
+- **Primary responsibility:** identity and session lifecycle.
+- **Owns data:** `users`, `refresh_tokens`.
+- **Key APIs:** `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/me`.
+- **Security contract:** issues RS256 JWTs; other services validate tokens offline using JWKS/public key.
+- **Failure boundary:** auth failures are isolated; downstream services return `401`/`403` without calling auth synchronously.
 
 ```mermaid
-flowchart LR
-  UI --> AUTH[auth_service]
-  AUTH --> MYSQL[(users, refresh_tokens)]
-  AUTH --> JWKS[RS256 / JWKS]
+sequenceDiagram
+  actor U as User
+  participant FE as Frontend
+  participant AUTH as auth_service
+  participant DB as MySQL
+  U->>FE: Login
+  FE->>AUTH: POST /auth/login
+  AUTH->>DB: Validate credentials, store refresh token hash
+  DB-->>AUTH: User + token row
+  AUTH-->>FE: Access token + refresh token
+  FE->>AUTH: POST /auth/refresh (later)
+  AUTH->>DB: Verify refresh token, rotate token
+  AUTH-->>FE: New access token
 ```
 
 ### `member_profile_service` (`:8002`)
-- Owns member profile CRUD, resume/media upload metadata, profile search/read.
-- Produces member/profile events consumed by analytics and notifications.
+- **Primary responsibility:** member profile CRUD + media metadata + profile search.
+- **Owns data:** `members` row model (profile, resume URL/text, structured profile fields).
+- **Caches/coordination:** pending profile update and upload-status keys in Redis.
+- **Events produced:** `member.update.requested`, `profile.viewed` (analytics + notification inputs).
+- **Notable behavior:** profile reads can include pending data for eventual-consistency UX.
 
 ```mermaid
-flowchart LR
-  UI --> MEMBER[member_profile_service]
-  MEMBER --> MYSQL[(members)]
-  MEMBER --> REDIS[(pending updates / upload status cache)]
-  MEMBER --> KAFKA[(member.update.requested, profile.viewed)]
+sequenceDiagram
+  actor M as Member
+  participant FE as Frontend
+  participant MEM as member_profile_service
+  participant R as Redis
+  participant DB as MySQL
+  participant K as Kafka
+  M->>FE: Save profile
+  FE->>MEM: POST /members/update
+  MEM->>R: Set pending member update (TTL)
+  MEM->>K: Publish member.update.requested
+  MEM-->>FE: 202 accepted with pending profile
+  MEM->>DB: Async projector applies update
+  DB-->>MEM: Profile version advanced
+  FE->>MEM: POST /members/get
+  MEM-->>FE: Persisted profile
 ```
 
 ### `recruiter_company_service` (`:8003`)
-- Owns recruiter identity and company profile metadata.
+- **Primary responsibility:** recruiter identity and company profile metadata.
+- **Owns data:** `recruiters`, `companies`.
+- **Key APIs:** `/recruiters/create|get|update|publicGet`, `/companies/create`.
+- **Usage:** source of truth for recruiter-company mapping used by jobs and recruiter UI.
 
 ```mermaid
-flowchart LR
-  UI --> R[recruiter_company_service]
-  R --> MYSQL[(recruiters, companies)]
+sequenceDiagram
+  actor R as Recruiter
+  participant FE as Frontend
+  participant RC as recruiter_company_service
+  participant DB as MySQL
+  R->>FE: Save company details
+  FE->>RC: POST /companies/create
+  RC->>DB: Upsert company + recruiter linkage
+  DB-->>RC: Company/recruiter rows
+  RC-->>FE: Company profile response
 ```
 
 ### `jobs_service` (`:8004`)
-- Job posting lifecycle: create/update/close/search/byRecruiter/save.
-- Includes salary range filters and FULLTEXT job search.
+- **Primary responsibility:** job lifecycle and discovery/search.
+- **Owns data:** `jobs`, `saved_jobs`.
+- **Query features:** FULLTEXT title/location search, salary range filters, recruiter-owned listing.
+- **Caching:** job detail/search count caches in Redis.
+- **Events produced:** `job.created`, `job.updated`, `job.closed`, `job.saved`.
 
 ```mermaid
-flowchart LR
-  UI --> J[jobs_service]
-  J --> MYSQL[(jobs, saved_jobs)]
-  J --> REDIS[(job detail/search caches)]
-  J --> KAFKA[(job.created, job.updated, job.closed, job.saved)]
+sequenceDiagram
+  actor R as Recruiter
+  participant FE as Frontend
+  participant J as jobs_service
+  participant DB as MySQL
+  participant K as Kafka
+  R->>FE: Create or update job
+  FE->>J: POST /jobs/create or /jobs/update
+  J->>DB: Write jobs row + outbox metadata
+  DB-->>J: Persisted job_id/version
+  J->>K: Publish job.created/job.updated
+  J-->>FE: Success response
 ```
 
 ### `applications_service` (`:8005`)
-- Async application submit (202), recruiter status updates, list by job/member.
-- Uses outbox + Kafka for robust event publication.
+- **Primary responsibility:** async application intake + recruiter application operations.
+- **Owns data:** `applications`, `application_notes`, application-related `outbox_events`.
+- **Key APIs:** `/applications/submit` (async 202), `/applications/byJob`, `/applications/byMember`, `/applications/updateStatus`.
+- **Reliability model:** idempotency + outbox to avoid dropped status/event transitions.
+- **Events produced:** `application.submit.requested`, `application.submitted`, `application.status.updated`.
 
 ```mermaid
-flowchart LR
-  UI --> A[applications_service]
-  A --> MYSQL[(applications, application_notes, outbox_events)]
-  A --> KAFKA[(application.submit.requested, application.status.updated, application.submitted)]
+sequenceDiagram
+  actor C as Candidate
+  participant FE as Frontend
+  participant A as applications_service
+  participant K as Kafka
+  participant DB as MySQL
+  C->>FE: Apply to job
+  FE->>A: POST /applications/submit
+  A->>K: Publish application.submit.requested
+  A-->>FE: 202 accepted
+  K-->>A: Consume submit request
+  A->>DB: Insert application + outbox
+  A->>K: Publish application.submitted
 ```
 
 ### `messaging_connections_service` (`:8006`)
-- Messaging threads/messages + connection request/accept/reject/withdraw/remove.
-- Persists chat graph/documents in Mongo.
+- **Primary responsibility:** messaging (threads/messages) and social graph actions.
+- **Owns data:** Mongo collections `threads`, `messages`, `connection_requests`, `connections`.
+- **Key APIs:** `/threads/open`, `/messages/send`, `/connections/request|accept|reject|withdraw|remove`.
+- **Event outputs:** `message.sent`, `connection.requested|accepted|rejected`.
+- **Design choice:** document model for thread/message fanout and timeline reads.
 
 ```mermaid
-flowchart LR
-  UI --> M[messaging_connections_service]
-  M --> MONGO[(threads, messages, connections, connection_requests)]
-  M --> MYSQL[(notifications/outbox interoperability)]
-  M --> KAFKA[(message.sent, connection.*)]
+sequenceDiagram
+  actor U as User
+  participant FE as Frontend
+  participant MSG as messaging_connections_service
+  participant MG as MongoDB
+  participant K as Kafka
+  U->>FE: Send message
+  FE->>MSG: POST /messages/send
+  MSG->>MG: Insert message, update thread latest_message_at
+  MSG->>K: Publish message.sent
+  MSG-->>FE: Message DTO
 ```
 
 ### `analytics_service` (`:8007`)
-- Ingests platform events, maintains rollups, serves funnel/geo/top/member analytics.
-- Recruiter dashboards now filtered by recruiter-owned jobs.
+- **Primary responsibility:** analytics ingestion + materialized rollups + dashboard query APIs.
+- **Owns data:** Mongo `events`, `events_rollup`, `benchmarks`.
+- **Caching:** Redis `analytics:*` query response cache.
+- **Current behavior updates:** recruiter charts scoped to recruiter-owned jobs; member status chart uses latest status per application.
+- **Key APIs:** `/events/ingest`, `/analytics/jobs/top`, `/analytics/funnel`, `/analytics/geo`, `/analytics/member/dashboard`, `/benchmarks/*`.
 
 ```mermaid
-flowchart LR
-  KAFKA --> AN[analytics_service]
-  UI --> AN
-  AN --> MONGO[(events, events_rollup, benchmarks)]
-  AN --> REDIS[(analytics:* query caches)]
-  AN --> MYSQL[(job/application lookups for scoped analytics)]
+sequenceDiagram
+  participant K as Kafka
+  participant AN as analytics_service
+  participant MG as MongoDB
+  participant RS as Redis
+  participant DB as MySQL
+  participant FE as Frontend
+  K-->>AN: Consume domain events
+  AN->>MG: Append events + update rollups
+  AN->>RS: Invalidate analytics:* caches
+  FE->>AN: POST /analytics/jobs/top
+  AN->>RS: Cache lookup
+  alt cache miss
+    AN->>MG: Read rollup counters
+    AN->>DB: Job/application lookup for scoped filtering
+    AN->>RS: Store response TTL
+  end
+  AN-->>FE: Chart payload
 ```
 
 ### `ai_orchestrator_service` (`:8008`)
-- Candidate ranking task orchestration, outreach draft generation, AI career coach.
-- Uses OpenRouter when configured; falls back to embedding/rules baseline.
+- **Primary responsibility:** AI task orchestration for recruiter copilot and member career coach.
+- **Owns data:** Mongo `ai_tasks`, `ai_task_steps`; uses Redis task snapshots for low-latency polling.
+- **Read dependencies:** jobs/members/applications from MySQL-backed repositories.
+- **LLM integration:** OpenRouter (when key present), fallback to embedding/rules baseline.
+- **Event outputs:** AI task and decision events (`ai.results`, task lifecycle updates).
 
 ```mermaid
-flowchart LR
-  UI --> AI[ai_orchestrator_service]
-  AI --> MYSQL[(jobs, members, applications read paths)]
-  AI --> MONGO[(ai_tasks, ai_task_steps)]
-  AI --> REDIS[(ai:task:* and coach_hist:* caches)]
-  AI --> KAFKA[(ai.results and workflow events)]
-  AI --> LLM[OpenRouter API]
+sequenceDiagram
+  actor R as Recruiter
+  participant FE as Frontend
+  participant AI as ai_orchestrator_service
+  participant DB as MySQL
+  participant MG as MongoDB
+  participant RS as Redis
+  participant OR as OpenRouter
+  participant K as Kafka
+  R->>FE: Start ranking task
+  FE->>AI: POST /ai/tasks/create
+  AI->>DB: Read job + applicants + profile data
+  AI->>OR: Generate shortlist/rationale/drafts
+  AI->>MG: Persist ai_tasks + ai_task_steps
+  AI->>RS: Cache ai:task:{task_id}
+  AI->>K: Publish ai.results
+  AI-->>FE: Task id + progress/output
 ```
 
 ## Data Storage Architecture
