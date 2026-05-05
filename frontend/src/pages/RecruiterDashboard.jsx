@@ -5,6 +5,7 @@ import {
   LineChart, Line,
 } from 'recharts';
 import BASE from '../config/api';
+import { normalizeMemberMediaUrl } from '../utils/memberMediaUrl';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -547,7 +548,11 @@ export default function RecruiterDashboard() {
                       <p style={{ color:'rgba(0,0,0,0.45)', fontSize:12 }}>{app.status}</p>
                     </div>
                     <div style={{ display:'flex', gap:8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      {app.resume_url && <a href={app.resume_url} target="_blank" rel="noreferrer"><button style={S.smallBtn}>Resume</button></a>}
+                      {app.resume_url && (
+                        <a href={normalizeMemberMediaUrl(app.resume_url)} target="_blank" rel="noreferrer">
+                          <button style={S.smallBtn}>Resume</button>
+                        </a>
+                      )}
                       {sentConnections[app.member_id] ? (
                         <button onClick={() => withdrawConnection(app.member_id)} style={S.smallBtnDanger}>Withdraw request</button>
                       ) : (
