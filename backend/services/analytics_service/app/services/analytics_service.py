@@ -2,7 +2,7 @@ import asyncio
 from services.shared.cache import delete_pattern, get_json, set_json
 from services.shared.common import body_hash, build_event, fail, require_auth, success
 from services.shared.kafka_bus import consume_forever, publish_event
-from services.shared.repositories import JobRepository
+from services.shared.repositories import ApplicationRepository, JobRepository
 
 
 class AnalyticsService:
@@ -12,6 +12,7 @@ class AnalyticsService:
         self.repo = repo
         self.rollups = rollups
         self.jobs = JobRepository()
+        self.applications = ApplicationRepository()
         self.stop_event = asyncio.Event()
         self.tasks: list[asyncio.Task] = []
 
@@ -81,7 +82,12 @@ class AnalyticsService:
             return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
         if actor['role'] not in {'recruiter', 'admin'}:
             return fail('forbidden', 'Recruiter/admin only.', trc, status_code=403)
-        cache_key = f"analytics:jobs_top:{body_hash(payload)}"
+        requested_recruiter_id = payload.get('recruiter_id')
+        actor_sub = actor.get('sub')
+        recruiter_id = requested_recruiter_id or actor_sub
+        if actor.get('role') != 'admin' and recruiter_id != actor_sub:
+            return fail('forbidden', 'Recruiters may only view analytics for their own jobs.', trc, status_code=403)
+        cache_key = f"analytics:jobs_top:{actor_sub}:{body_hash({'metric': payload.get('metric', 'applications'), 'limit': payload.get('limit', 10), 'sort': payload.get('sort', 'desc'), 'recruiter_id': recruiter_id})}"
         cached = get_json(cache_key)
         if cached:
             return success(cached, trc, {'cache': 'hit'})
@@ -89,13 +95,17 @@ class AnalyticsService:
         sort = (payload.get('sort') or 'desc').lower()
         if sort not in {'asc', 'desc'}:
             sort = 'desc'
-        rows = self.rollups.top_jobs(metric, int(payload.get('limit', 10)), sort)
+        rows = self.rollups.top_jobs(metric, 200, sort)
         items = []
         for row in rows:
             if not row.get('job_id'):
                 continue
             job = self.jobs.get(row.get('job_id')) or {}
+            if recruiter_id and job.get('recruiter_id') != recruiter_id:
+                continue
             items.append({'job_id': row.get('job_id'), 'count': int(row.get('count', 0)), 'metric_value': int(row.get('count', 0)), 'title': job.get('title') or row.get('job_id'), 'company_name': job.get('company_name', '')})
+        limit = max(1, int(payload.get('limit', 10)))
+        items = items[:limit]
         body = {'items': items}
         set_json(cache_key, body, self.ANALYTICS_TTL)
         return success(body, trc, {'cache': 'miss'})
@@ -146,7 +156,14 @@ class AnalyticsService:
         cached = get_json(cache_key)
         if cached:
             return success(cached, trc, {'cache': 'hit'})
-        body = self.rollups.member_dashboard(payload.get('member_id'))
+        member_id = payload.get('member_id')
+        body = self.rollups.member_dashboard(member_id)
+        # Use current application rows so each application contributes only one (latest) status.
+        latest_statuses: dict[str, int] = {}
+        for app in self.applications.list_by_member(member_id):
+            status = str(app.get('status') or 'submitted')
+            latest_statuses[status] = int(latest_statuses.get(status, 0)) + 1
+        body['application_status_breakdown'] = latest_statuses
         body['profile_views'] = [
             {'view_date': item.get('date'), 'view_count': int(item.get('count', 0))}
             for item in body.get('profile_views', [])

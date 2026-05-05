@@ -961,11 +961,34 @@ class AnalyticsRollupRepository:
             replace_one('events_rollup', {'rollup_id': rid}, existing, upsert=True)
         if event_type in {'application.status.updated', 'application.submitted'} and member_id:
             rid = f'member_status:{member_id}'
-            existing = find_one('events_rollup', {'rollup_id': rid}) or {'rollup_id': rid, 'kind': 'member_status', 'member_id': member_id, 'statuses': {}}
-            statuses = existing.get('statuses', {})
-            status = payload.get('status', 'submitted')
-            statuses[status] = int(statuses.get(status, 0)) + 1
-            existing['statuses'] = statuses
+            existing = find_one('events_rollup', {'rollup_id': rid}) or {
+                'rollup_id': rid,
+                'kind': 'member_status',
+                'member_id': member_id,
+                'statuses': {},
+                # Tracks latest status per application_id so pie chart reflects current state only.
+                'application_statuses': {},
+            }
+            statuses = existing.get('statuses', {}) or {}
+            app_statuses = existing.get('application_statuses', {}) or {}
+            application_id = (
+                payload.get('application_id')
+                or entity.get('entity_id')
+                or event.get('entity_id')
+            )
+            new_status = str(payload.get('status') or 'submitted')
+            previous_status = payload.get('previous_status')
+            if not previous_status and application_id:
+                previous_status = app_statuses.get(application_id)
+            if previous_status:
+                previous_status = str(previous_status)
+                if previous_status != new_status and int(statuses.get(previous_status, 0)) > 0:
+                    statuses[previous_status] = int(statuses.get(previous_status, 0)) - 1
+            if application_id:
+                app_statuses[application_id] = new_status
+            statuses[new_status] = int(statuses.get(new_status, 0)) + 1
+            existing['statuses'] = {k: int(v) for k, v in statuses.items() if int(v) > 0}
+            existing['application_statuses'] = app_statuses
             replace_one('events_rollup', {'rollup_id': rid}, existing, upsert=True)
 
     def top_jobs(self, metric: str, limit: int, sort: str = 'desc') -> list[dict[str, Any]]:
