@@ -412,7 +412,9 @@ async def get_member(payload: dict = Body(...), authorization: str | None = Head
         return success({"profile": profile}, trc, {'write_state': 'pending'})
 
     row = fetch_one("SELECT * FROM members WHERE member_id=:member_id", {"member_id": member_id})
-    if not row and member_id == actor["actor_id"]:
+    # Only auto-bootstrap self profiles for member role. Recruiters should fall back
+    # to recruiter profile APIs on the frontend instead of getting an empty member row.
+    if not row and member_id == actor["actor_id"] and actor.get("role") == "member":
         row = _ensure_member(member_id, actor.get("email"))
     if not row:
         return fail("member_not_found", "Member profile not found.", trc, status_code=404)
