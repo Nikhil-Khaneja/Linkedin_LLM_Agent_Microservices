@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import toast from 'react-hot-toast';
 import BASE from '../config/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -54,6 +55,28 @@ export default function ApplicationsPage() {
     return acc;
   }, {}), [apps]);
 
+  const canWithdraw = (status) => {
+    const s = String(status || 'submitted').toLowerCase();
+    return !['withdrawn', 'rejected', 'hired'].includes(s);
+  };
+
+  const withdrawApp = async (app) => {
+    if (!canWithdraw(app.status)) return;
+    if (!window.confirm('Withdraw this application?')) return;
+    try {
+      await axios.post(
+        `${BASE.application}/applications/withdraw`,
+        { application_id: app.application_id, job_id: app.job_id },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` } },
+      );
+      toast.success('Application withdrawn');
+      window.dispatchEvent(new CustomEvent('applications:changed', { detail: { jobId: app.job_id } }));
+      await loadApps();
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Could not withdraw');
+    }
+  };
+
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
       <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 16 }}>My Jobs</h1>
@@ -95,6 +118,9 @@ export default function ApplicationsPage() {
                   </div>
                   <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8 }}>
                     <span style={{ background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.color}40`, padding:'4px 14px', borderRadius:12, fontSize:13, fontWeight:600 }}>{cfg.label}</span>
+                    {canWithdraw(app.status) && (
+                      <button type="button" onClick={() => withdrawApp(app)} style={S.withdrawBtn}>Withdraw</button>
+                    )}
                     <div style={{ width:160 }}><div style={{ background:'rgba(0,0,0,0.08)', borderRadius:4, height:4, overflow:'hidden' }}><div style={{ height:'100%', background:cfg.color, width:`${cfg.pct}%`, borderRadius:4 }} /></div></div>
                   </div>
                 </div>
@@ -138,5 +164,6 @@ const S = {
   activeTab: { background:'#eef5fc', color:'#0a66c2', borderColor:'#0a66c2' },
   summaryRow: { display:'flex', gap:10, flexWrap:'wrap', marginBottom:16 },
   summaryCard: { display:'flex', flexDirection:'column', gap:2, padding:'12px 20px', borderRadius:8, border:'1px solid', minWidth:100, alignItems:'center' },
-  compLogo: { width:52, height:52, background:'#f3f2ef', border:'1px solid rgba(0,0,0,0.1)', borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:700, color:'#444', flexShrink:0 }
+  compLogo: { width:52, height:52, background:'#f3f2ef', border:'1px solid rgba(0,0,0,0.1)', borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:700, color:'#444', flexShrink:0 },
+  withdrawBtn: { padding:'6px 14px', background:'#fff', color:'#b42318', border:'1px solid #b42318', borderRadius:999, fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit' },
 };
