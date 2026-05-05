@@ -1314,7 +1314,8 @@ def _apprepo_list_by_job_impl(self, job_id: str):
         """
         SELECT a.application_id, a.job_id, a.member_id, a.resume_ref, a.cover_letter, a.status,
                a.application_datetime, a.payload_json,
-               m.first_name, m.last_name, m.headline, m.payload_json AS member_payload_json
+               m.first_name, m.last_name, m.headline, m.payload_json AS member_payload_json,
+               m.resume_url AS member_resume_url, m.profile_photo_url AS member_profile_photo_url
         FROM applications a
         LEFT JOIN members m ON m.member_id = a.member_id
         WHERE a.job_id=:job_id
@@ -1340,11 +1341,11 @@ def _apprepo_list_by_job_impl(self, job_id: str):
         if isinstance(payload, dict):
             item.update(payload)
         member_payload = _from_json(row.get('member_payload_json'), {})
-        if isinstance(member_payload, dict):
-            item['profile_photo_url'] = member_payload.get('profile_photo_url')
-            item['resume_url'] = member_payload.get('resume_url')
-            item['city'] = item.get('city') or member_payload.get('city')
-            item['state'] = item.get('state') or member_payload.get('state')
+        mp = member_payload if isinstance(member_payload, dict) else {}
+        item['profile_photo_url'] = mp.get('profile_photo_url') or row.get('member_profile_photo_url')
+        item['resume_url'] = mp.get('resume_url') or row.get('member_resume_url')
+        item['city'] = item.get('city') or mp.get('city')
+        item['state'] = item.get('state') or mp.get('state')
         items.append(item)
     return items
 
