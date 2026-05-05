@@ -6,12 +6,16 @@ Full-stack LinkedIn clone built as a distributed systems course project. Eight F
 
 ## Team
 
-| Person | Name | Responsibilities |
-|--------|------|-----------------|
-| Person 1 | Nikhil Khaneja | Kafka-first flows, auth/infra, exception handling, notifications, AWS Terraform |
-| Person 2 | Shreya | AI Career Coach, AI evaluation metrics, outreach drafts |
-| Person 3 | Drashti | Salary filter, FULLTEXT job search, low-traction chart, 10k dataset loader |
-| Person 4 | Sanjay | JMeter benchmarks, ECS task definitions, performance analysis |
+| Name |
+|------|
+| Dhruv |
+| Nikhil |
+| Sanjay |
+| Viraat |
+| Shreya |
+| Drashti |
+| Charvee |
+| Shriram |
 
 ---
 
