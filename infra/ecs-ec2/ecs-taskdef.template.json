@@ -114,7 +114,7 @@
     {
       "name": "redis",
       "image": "redis:7",
-      "memoryReservation": 128,
+      "memoryReservation": 96,
       "essential": true,
       "mountPoints": [
         {
@@ -291,7 +291,7 @@
     {
       "name": "kafka_topics_viewer",
       "image": "__KAFKA_VIEWER_IMAGE__",
-      "memoryReservation": 256,
+      "memoryReservation": 128,
       "essential": false,
       "dependsOn": [
         {
@@ -302,7 +302,7 @@
       "environment": [
         {
           "name": "KAFKA_BOOTSTRAP_SERVERS",
-          "value": "kafka:9092"
+          "value": "__ECS_HOST_PRIVATE_IP__:9092"
         }
       ],
       "logConfiguration": {
