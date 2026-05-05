@@ -18,7 +18,6 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import ConnectionsPage from './pages/ConnectionsPage';
 import NotificationsPage from './pages/NotificationsPage';
 import CareerCoachPage from './pages/CareerCoachPage';
-import PerformancePage from './pages/PerformancePage';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }) {
@@ -29,7 +28,6 @@ function PrivateRoute({ children }) {
 
 function AppRoutes() {
   const { user } = useAuth();
-  const isRecruiter = user?.userType === 'recruiter';
   return (
     <Routes>
       <Route path="/login"    element={user ? <Navigate to="/" /> : <LoginPage />} />
@@ -48,10 +46,6 @@ function AppRoutes() {
         <Route path="connections"     element={<ConnectionsPage />} />
         <Route path="notifications"   element={<NotificationsPage />} />
         <Route path="coach"           element={<CareerCoachPage />} />
-        <Route
-          path="performance"
-          element={isRecruiter ? <PerformancePage /> : <Navigate to="/analytics" replace />}
-        />
       </Route>
     </Routes>
   );

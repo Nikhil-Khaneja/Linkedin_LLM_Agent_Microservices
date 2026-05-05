@@ -8,6 +8,7 @@ from uuid import uuid4
 import httpx
 from fastapi import WebSocket
 
+from services.ai_orchestrator_service.app.services.ai_list_coercion import coerce_str_list
 from services.ai_orchestrator_service.app.services.ai_matching import CandidateMatchingService
 from services.ai_orchestrator_service.app.services.ai_openrouter_client import OpenRouterClient
 from services.ai_orchestrator_service.app.services.ai_resume_intelligence import collect_resume_text, parse_resume
@@ -186,9 +187,15 @@ class AIOrchestratorService:
             if not base:
                 continue
             base.update({key: value for key, value in item.items() if value not in (None, '')})
-            base['skill_overlap'] = list(item.get('skill_overlap') or base.get('skill_overlap') or [])
-            base['missing_skills'] = list(item.get('missing_skills') or base.get('missing_skills') or [])
-            base['keyword_overlap'] = list(base.get('keyword_overlap') or [])
+            so = item.get('skill_overlap')
+            if so in (None, ''):
+                so = base.get('skill_overlap')
+            base['skill_overlap'] = coerce_str_list(so)
+            ms = item.get('missing_skills')
+            if ms in (None, ''):
+                ms = base.get('missing_skills')
+            base['missing_skills'] = coerce_str_list(ms)
+            base['keyword_overlap'] = coerce_str_list(base.get('keyword_overlap'))
             try:
                 base['match_score'] = int(item.get('match_score', base.get('match_score', 0)))
             except Exception:
@@ -207,8 +214,8 @@ class AIOrchestratorService:
                 'match_score': candidate.get('match_score'),
                 'embedding_similarity': candidate.get('embedding_similarity'),
                 'resume_parsed': candidate.get('resume_parsed', {}),
-                'skill_overlap': list(candidate.get('skill_overlap') or []),
-                'missing_skills': list(candidate.get('missing_skills') or []),
+                'skill_overlap': coerce_str_list(candidate.get('skill_overlap')),
+                'missing_skills': coerce_str_list(candidate.get('missing_skills')),
                 'rationale': candidate.get('rationale'),
             })
         return parsed

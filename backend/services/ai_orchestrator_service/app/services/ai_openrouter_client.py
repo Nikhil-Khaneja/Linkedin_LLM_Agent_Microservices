@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from services.ai_orchestrator_service.app.services.ai_list_coercion import coerce_str_list
 from services.shared.observability import get_logger, log_event
 
 
@@ -54,8 +55,8 @@ class OpenRouterClient:
                     'headline': candidate.get('headline'),
                     'resume_text': candidate.get('resume_text', ''),
                     'parsed_resume': candidate.get('resume_parsed', {}),
-                    'skill_overlap': list(candidate.get('skill_overlap') or []),
-                    'missing_skills': list(candidate.get('missing_skills') or []),
+                    'skill_overlap': coerce_str_list(candidate.get('skill_overlap')),
+                    'missing_skills': coerce_str_list(candidate.get('missing_skills')),
                     'baseline_score': candidate.get('match_score'),
                     'embedding_similarity': candidate.get('embedding_similarity'),
                     'rationale': candidate.get('rationale'),
@@ -174,7 +175,7 @@ class OpenRouterClient:
                 'seniority_level': job.get('seniority_level'),
                 'skills_required': job.get('skills_required') or job.get('skills') or [],
             },
-            'missing_skills': list(missing_skills or []),
+            'missing_skills': coerce_str_list(missing_skills),
         }
         system = (
             'You are a career coach for a member applying to a specific job. '
