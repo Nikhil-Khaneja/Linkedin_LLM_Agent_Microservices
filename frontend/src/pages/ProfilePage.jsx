@@ -408,7 +408,7 @@ export default function ProfilePage() {
   };
 
   const avatarLetter = (displayName || profile?.email || profile?.member_id || profile?.recruiter_id || 'U')[0].toUpperCase();
-  const resumeUrl = profile?.resume_url;
+  const resumeUrl = profile?.resume_url ? normalizeMemberMediaUrl(profile.resume_url) : '';
   const experienceItems = Array.isArray(profile?.experience) ? profile.experience : [];
   const educationItems = Array.isArray(profile?.education) ? profile.education : [];
   const skills = Array.isArray(profile?.skills) ? profile.skills : [];
