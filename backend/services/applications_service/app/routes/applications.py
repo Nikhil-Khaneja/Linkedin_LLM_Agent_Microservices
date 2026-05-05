@@ -28,6 +28,10 @@ def by_member(payload: dict = Body(...), authorization: str | None = Header(None
 async def update_status(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), idempotency_key: str | None = Header(None), svc=Depends(get_applications_service)):
     return await svc.update_status(payload, authorization, trace_id(x_trace_id), idempotency_key)
 
+@router.post('/applications/withdraw')
+async def withdraw_application(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), idempotency_key: str | None = Header(None), svc=Depends(get_applications_service)):
+    return await svc.withdraw(payload, authorization, trace_id(x_trace_id), idempotency_key)
+
 @router.post('/applications/addNote')
 def add_note(payload: dict = Body(...), authorization: str | None = Header(None), x_trace_id: str | None = Header(None), svc=Depends(get_applications_service)):
     return svc.add_note(payload, authorization, trace_id(x_trace_id))

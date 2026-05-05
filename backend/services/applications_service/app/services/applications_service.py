@@ -238,6 +238,67 @@ class ApplicationsService:
             log_event(self.logger, 'application_status_update_notification_failed', trace_id=trc, action='update_status', route='/applications/updateStatus', application_id=payload.get('application_id'), member_id=current.get('member_id'), current_status=new, error_message=str(exc))
         return success({'application_id': app_row['application_id'], 'previous_status': old, 'current_status': new}, trc, {'event_dispatch': 'queued'})
 
+    async def withdraw(self, payload, authorization, trc, idempotency_key=None):
+        try:
+            actor = require_auth(authorization)
+        except Exception:
+            log_event(self.logger, 'application_withdraw_auth_failed', trace_id=trc, action='withdraw', route='/applications/withdraw', error_code='auth_required')
+            return fail('auth_required', 'Missing, expired, or invalid bearer token.', trc, status_code=401)
+        if actor['role'] != 'member':
+            log_event(self.logger, 'application_withdraw_forbidden', trace_id=trc, action='withdraw', route='/applications/withdraw', actor_role=actor.get('role'), error_code='forbidden')
+            return fail('forbidden', 'Only members can withdraw their own applications.', trc, status_code=403)
+        member_id = actor['sub']
+        application_id = payload.get('application_id')
+        job_id = payload.get('job_id')
+        if application_id:
+            current = self.repo.get(application_id)
+        elif job_id:
+            current = self.repo.find_duplicate(job_id, member_id)
+        else:
+            return fail('validation_error', 'application_id or job_id is required.', trc, status_code=400)
+        if not current:
+            log_event(self.logger, 'application_withdraw_not_found', trace_id=trc, action='withdraw', route='/applications/withdraw', member_id=member_id, job_id=job_id, application_id=application_id, error_code='not_found')
+            return fail('not_found', 'No active application found.', trc, status_code=404)
+        if current.get('member_id') != member_id:
+            return fail('forbidden', 'You can only withdraw your own applications.', trc, status_code=403)
+        old_raw = current.get('status') or 'submitted'
+        old_lc = str(old_raw).lower()
+        if old_lc == 'withdrawn':
+            return fail('invalid_state', 'Application is already withdrawn.', trc, status_code=409)
+        if old_lc in {'hired', 'rejected'}:
+            return fail('invalid_state', 'This application cannot be withdrawn.', trc, status_code=409)
+
+        route = '/applications/withdraw'
+        key = idempotency_key or payload.get('idempotency_key') or f'withdraw:{current["application_id"]}'
+        h = body_hash(payload)
+        existing, conflict = check_idempotency(route, key, h)
+        if conflict:
+            return fail('idempotency_conflict', 'Same Idempotency-Key reused with different payload.', trc, status_code=409)
+        if existing:
+            return success(existing.get('data', {}), existing.get('trace_id', trc), existing.get('meta'))
+
+        new = 'withdrawn'
+        event = build_event(
+            event_type='application.status.updated',
+            actor_id=member_id,
+            entity_type='application',
+            entity_id=current['application_id'],
+            payload={'member_id': member_id, 'job_id': current.get('job_id'), 'status': new, 'previous_status': old_raw},
+            trace=trc,
+            idempotency_key=key,
+        )
+        try:
+            app_row, _ = self.repo.update_status_with_outbox(current['application_id'], new, 'application.status.updated', event)
+            log_event(self.logger, 'application_withdraw_persisted', trace_id=trc, action='withdraw', route=route, application_id=current['application_id'], member_id=member_id, job_id=current.get('job_id'), previous_status=str(old_raw))
+        except Exception as exc:
+            log_event(self.logger, 'application_withdraw_failed', trace_id=trc, action='withdraw', route=route, application_id=current.get('application_id'), error=str(exc))
+            return fail('application_update_failed', f'Failed to withdraw application: {str(exc)}', trc, status_code=500)
+
+        response_data = {'application_id': app_row['application_id'], 'job_id': app_row.get('job_id'), 'previous_status': old_raw, 'current_status': new}
+        response = {'trace_id': trc, 'data': response_data, 'meta': {'event_dispatch': 'queued'}}
+        record_idempotency(route, key, h, response)
+        return success(response_data, trc, response['meta'])
+
     def add_note(self, payload, authorization, trc):
         log_event(self.logger, 'application_note_add_received', trace_id=trc, action='add_note', route='/applications/addNote', application_id=payload.get('application_id'))
         try:

@@ -1287,6 +1287,7 @@ def _apprepo_find_duplicate_impl(self, job_id: str, member_id: str):
         """
         SELECT application_id, job_id, member_id, resume_ref, cover_letter, status, application_datetime, payload_json
         FROM applications WHERE job_id=:job_id AND member_id=:member_id
+        AND LOWER(COALESCE(status, '')) <> 'withdrawn'
         """,
         {"job_id": job_id, "member_id": member_id},
     )

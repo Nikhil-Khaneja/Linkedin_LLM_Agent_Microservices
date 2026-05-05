@@ -64,6 +64,21 @@ class AnalyticsService:
         self.rollups.apply_event(payload)
         self.invalidate_rollup_cache()
         entity = payload.get('entity') or {}
+        inner = payload.get('payload') or {}
+        job_id = inner.get('job_id') or entity.get('entity_id')
+        if payload.get('event_type') == 'job.viewed' and job_id:
+            await publish_event(
+                'job.viewed',
+                build_event(
+                    event_type='job.viewed',
+                    actor_id=str(payload.get('actor_id') or 'anonymous'),
+                    entity_type=str(entity.get('entity_type') or 'job'),
+                    entity_id=str(entity.get('entity_id') or job_id),
+                    payload=inner if inner else {'job_id': job_id},
+                    trace=trc,
+                    idempotency_key=dedupe_key,
+                ),
+            )
         await publish_event('analytics.normalized', build_event(
             event_type='analytics.normalized',
             actor_id=payload.get('actor_id') or 'analytics_service',

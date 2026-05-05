@@ -28,6 +28,8 @@ export default function JobDetailPage() {
   const [resumeText, setResumeText] = useState('');
   const [resumeFile, setResumeFile] = useState(null);
   const [activeTab, setActiveTab] = useState('upload');
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [activeApplicationId, setActiveApplicationId] = useState(null);
   const submitLockRef = useRef(false);
   const applyKeyRef = useRef(newApplyKey(user?.principalId || user?.userId, jobId));
 
@@ -90,11 +92,16 @@ export default function JobDetailPage() {
         });
         const data = await res.json();
         if (data.success) {
-          setHasApplied((data.data?.items || []).some(a => a.job_id === jobId));
+          const row = (data.data?.items || []).find((a) => a.job_id === jobId && String(a.status || '').toLowerCase() !== 'withdrawn');
+          setHasApplied(Boolean(row));
+          setActiveApplicationId(row?.application_id || null);
         }
       } catch {}
     };
     checkApplied();
+    const onAppsChanged = () => checkApplied();
+    window.addEventListener('applications:changed', onAppsChanged);
+    return () => window.removeEventListener('applications:changed', onAppsChanged);
   }, [jobId, user?.principalId]);
 
   const handleFileChange = (e) => {
@@ -148,6 +155,27 @@ export default function JobDetailPage() {
         headers: { Authorization: 'Bearer ' + localStorage.getItem('access_token') }
       });
     } catch {}
+  };
+
+  const withdrawApplication = async () => {
+    if (!job?.job_id || withdrawing) return;
+    if (!window.confirm('Withdraw your application for this job? Employers will no longer see it as active.')) return;
+    setWithdrawing(true);
+    try {
+      await axios.post(
+        `${BASE.application}/applications/withdraw`,
+        { job_id: job.job_id, application_id: activeApplicationId || undefined },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` } },
+      );
+      setHasApplied(false);
+      setActiveApplicationId(null);
+      window.dispatchEvent(new CustomEvent('applications:changed', { detail: { jobId: job.job_id } }));
+      toast.success('Application withdrawn');
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Could not withdraw application');
+    } finally {
+      setWithdrawing(false);
+    }
   };
 
   const toggleSave = async () => {
@@ -262,6 +290,9 @@ export default function JobDetailPage() {
                 {job.status === 'open' && (
                   <button onClick={() => { if (!hasApplied) { markApplyStarted(); setShowModal(true); } }} style={{...S.applyBtn, background: hasApplied ? '#057642' : '#0a66c2', cursor: hasApplied ? 'default' : 'pointer'}}>{hasApplied ? '✓ Applied' : 'Apply'}</button>
                 )}
+                {hasApplied && (
+                  <button type="button" onClick={withdrawApplication} disabled={withdrawing} style={S.withdrawAppBtn}>{withdrawing ? 'Withdrawing…' : 'Withdraw application'}</button>
+                )}
                 <button onClick={toggleSave} disabled={saving} style={{...S.cancelBtn, borderRadius:24, color:isSaved ? '#0a66c2' : 'rgba(0,0,0,0.7)', borderColor:isSaved ? '#0a66c2' : 'rgba(0,0,0,0.35)'}}>{saving ? 'Saving…' : (isSaved ? 'Saved' : 'Save')}</button>
               </>
             )}
@@ -326,4 +357,4 @@ export default function JobDetailPage() {
 function Detail({ icon, label, value }) { if (!value) return null; return <div style={{ display:'flex', gap:10, padding:'8px 0', borderBottom:'1px solid rgba(0,0,0,0.06)', alignItems:'flex-start' }}><span style={{ fontSize:18, flexShrink:0 }}>{icon}</span><div><p style={{ fontSize:13, color:'rgba(0,0,0,0.5)' }}>{label}</p><p style={{ fontSize:15, fontWeight:600, color:'rgba(0,0,0,0.9)', textTransform:'capitalize' }}>{value}</p></div></div>; }
 function Pill({ children }) { return <span style={{ background:'#f3f6fb', border:'1px solid #c8d8e8', color:'#0a66c2', padding:'3px 12px', borderRadius:12, fontSize:13 }}>{children}</span>; }
 function StatusBadge({ status }) { const color = status==='open' ? '#057642' : '#cc1016'; return <span style={{ background:color+'18', color, border:`1px solid ${color}40`, padding:'3px 12px', borderRadius:12, fontSize:12, fontWeight:700, textTransform:'uppercase' }}>{status}</span>; }
-const S = { layout:{ display:'grid', gridTemplateColumns:'1fr 300px', gap:16, alignItems:'start' }, card:{ background:'#fff', borderRadius:8, boxShadow:'0 0 0 1px rgba(0,0,0,0.1)', padding:'20px 24px', overflow:'hidden' }, back:{ background:'none', border:'none', color:'#0a66c2', cursor:'pointer', fontSize:14, padding:0, fontFamily:'inherit', fontWeight:600 }, logo:{ width:72, height:72, background:'#f3f2ef', border:'1px solid rgba(0,0,0,0.1)', borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:800, color:'#444', flexShrink:0 }, applyBtn:{ padding:'10px 24px', background:'#0a66c2', color:'#fff', border:'none', borderRadius:24, fontSize:16, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }, secTitle:{ fontSize:18, fontWeight:700, marginBottom:14, paddingBottom:10, borderBottom:'1px solid rgba(0,0,0,0.08)' }, overlay:{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:16 }, modal:{ background:'#fff', borderRadius:10, padding:'28px 28px 24px', width:'100%', maxWidth:560, boxShadow:'0 8px 40px rgba(0,0,0,0.3)', maxHeight:'90vh', overflowY:'auto' }, closeBtn:{ background:'none', border:'none', fontSize:22, cursor:'pointer', color:'rgba(0,0,0,0.5)', padding:4 }, cancelBtn:{ padding:'10px 20px', border:'1.5px solid rgba(0,0,0,0.35)', borderRadius:4, background:'#fff', fontSize:15, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }, fileLabel:{ display:'block', cursor:'pointer' } };
+const S = { layout:{ display:'grid', gridTemplateColumns:'1fr 300px', gap:16, alignItems:'start' }, card:{ background:'#fff', borderRadius:8, boxShadow:'0 0 0 1px rgba(0,0,0,0.1)', padding:'20px 24px', overflow:'hidden' }, back:{ background:'none', border:'none', color:'#0a66c2', cursor:'pointer', fontSize:14, padding:0, fontFamily:'inherit', fontWeight:600 }, logo:{ width:72, height:72, background:'#f3f2ef', border:'1px solid rgba(0,0,0,0.1)', borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:800, color:'#444', flexShrink:0 }, applyBtn:{ padding:'10px 24px', background:'#0a66c2', color:'#fff', border:'none', borderRadius:24, fontSize:16, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }, withdrawAppBtn:{ padding:'10px 20px', background:'#fff', color:'#b42318', border:'1px solid #b42318', borderRadius:24, fontSize:15, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }, secTitle:{ fontSize:18, fontWeight:700, marginBottom:14, paddingBottom:10, borderBottom:'1px solid rgba(0,0,0,0.08)' }, overlay:{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:16 }, modal:{ background:'#fff', borderRadius:10, padding:'28px 28px 24px', width:'100%', maxWidth:560, boxShadow:'0 8px 40px rgba(0,0,0,0.3)', maxHeight:'90vh', overflowY:'auto' }, closeBtn:{ background:'none', border:'none', fontSize:22, cursor:'pointer', color:'rgba(0,0,0,0.5)', padding:4 }, cancelBtn:{ padding:'10px 20px', border:'1.5px solid rgba(0,0,0,0.35)', borderRadius:4, background:'#fff', fontSize:15, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }, fileLabel:{ display:'block', cursor:'pointer' } };

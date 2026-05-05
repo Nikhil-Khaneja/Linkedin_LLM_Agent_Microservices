@@ -39,7 +39,11 @@ export default function DashboardPage() {
     if (!token || !currentId) return;
     try {
       const { data } = await axios.post(`${BASE.application}/applications/byMember`, { member_id: currentId }, authCfg);
-      const ids = new Set((data?.data?.items || []).map((a) => a.job_id));
+      const ids = new Set(
+        (data?.data?.items || [])
+          .filter((a) => String(a.status || '').toLowerCase() !== 'withdrawn')
+          .map((a) => a.job_id),
+      );
       setAppliedJobIds(ids);
     } catch {
       setAppliedJobIds(new Set());
