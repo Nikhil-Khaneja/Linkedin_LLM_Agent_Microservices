@@ -113,11 +113,12 @@ export default function RecruiterDashboard() {
     if (!token || !recruiterId) return;
     setChartsLoading(true);
     try {
+      const recruiterScopedPayload = { recruiter_id: recruiterId };
       const [topData, lowData, viewData, saveData] = await Promise.all([
-        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'applications', limit: 10, sort: 'desc' }, authCfg),
-        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'applications', limit: 5, sort: 'asc' }, authCfg),
-        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'views', limit: 8 }, authCfg),
-        axios.post(`${BASE.analytics}/analytics/jobs/top`, { metric: 'saves', limit: 8 }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { ...recruiterScopedPayload, metric: 'applications', limit: 10, sort: 'desc' }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { ...recruiterScopedPayload, metric: 'applications', limit: 5, sort: 'asc' }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { ...recruiterScopedPayload, metric: 'views', limit: 8 }, authCfg),
+        axios.post(`${BASE.analytics}/analytics/jobs/top`, { ...recruiterScopedPayload, metric: 'saves', limit: 8 }, authCfg),
       ]);
       const mapBar = (items) => (items || []).map((j) => ({ name: (j.title || j.job_id || 'Job').slice(0, 18), count: j.count || j.metric_value || 0 }));
       setChartTop(mapBar(topData.data?.data?.items || []));
